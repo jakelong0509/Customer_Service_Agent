@@ -1,6 +1,6 @@
 from langgraph.runtime import Runtime
 from ..agent_base import AgentBase
-from typing import Any, List, Callable, Annotated
+from typing import Any, List, Callable, Annotated, Literal
 from langchain_core.messages import SystemMessage, HumanMessage
 from langgraph.graph import StateGraph, START, END
 from langgraph.graph.message import add_messages
@@ -20,28 +20,28 @@ class CustomerSupportAgentState(BaseModel):
 
 @register_agent("customer_support_agent")
 class CustomerSupportAgent(AgentBase):
-  def __init__(self, system_prompt: str, embedding_model: Any, llm: Any, tools: List[Callable], db_uri: str):
+  def __init__(self, system_prompt: str, embedding_model: Any, llm: Any, tools: List[Callable], db_uri: str, type: Literal["voice", "chat", "email"]):
     super().__init__()
     self.system_prompt = system_prompt
     self.llm = llm
     self.tools = tools
+    self.type = type
     self.llm_with_tools = self.llm.bind_tools(self.tools)
     self.tool_node = ToolNode(self.tools)
     self.embedding_model = embedding_model
     self.db_uri = db_uri
+    self.checkpointer = InMemorySaver()
     with PostgresStore.from_conn_string(
       conn_string = self.db_uri,
     ) as store:
       store.setup()
-      self.agent = self.build_graph().compile(checkpointer=InMemorySaver(), store=store)
+      self.agent = self.build_graph().compile(checkpointer=self.checkpointer, store=store)
 
   def run(self, request: AgentRunRequest, context: CallContext, customer: CustomerModel) -> str:
+    # use thread_id short term memory to keep the conversation context. If the call is ended, the thread_id should be deleted.
     response = self.agent.invoke({
       "messages": [HumanMessage(content=request.request)],    
-    }
-    , config={"configurable": {"thread_id": f"Customer_Support_Agent_{context.call_sid}"}}
-    , context=customer
-    )
+    }, config={"configurable": {"thread_id": f"Customer_Support_Agent:{self.type}:{context.call_sid}"}}, context=customer)
     return response.content
 
   async def agent(self, state: CustomerSupportAgentState, runtime: Runtime[CustomerModel]) -> CustomerSupportAgentState:
@@ -75,3 +75,7 @@ class CustomerSupportAgent(AgentBase):
     )
     
     return graph
+  
+  # remove the thread_id from the short term memory. It is called when the call is ended. Also we will called when user request to reset the conversation.
+  async def remove_thread_id(self, thread_id: str) -> None:
+    self.checkpointer.delete(thread_id)
