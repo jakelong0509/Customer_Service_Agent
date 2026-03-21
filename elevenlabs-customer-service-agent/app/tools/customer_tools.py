@@ -1,9 +1,7 @@
 # CRM lookups, account info
 from app.models.conversation import CallContext
-from app.tools.registry import register
 
 
-@register("lookup_customer")
 async def lookup_customer(arguments: dict, context: CallContext) -> str:
     """Look up customer by phone (or id). Returns summary for the agent to speak."""
     phone = arguments.get("phone") or arguments.get("phone_number") or context.from_number
@@ -15,8 +13,6 @@ async def lookup_customer(arguments: dict, context: CallContext) -> str:
         return f"Customer with phone {phone}: found (stub)."
     return "No phone or customer_id provided."
 
-
-@register("get_account_info")
 async def get_account_info(arguments: dict, context: CallContext) -> str:
     """Get account status, plan, or subscription for the current caller."""
     # TODO: resolve caller from context.from_number, then DB lookup

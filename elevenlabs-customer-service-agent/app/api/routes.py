@@ -1,24 +1,21 @@
 # HTTP routes — health and tool API (Twilio/ElevenLabs call these from their dashboards)
 from fastapi import APIRouter, Header, HTTPException
 from pydantic import BaseModel, Field
+from ..services.dispatch_agent import invoke_agent
 
 from app.models.conversation import CallContext
-from app.services.tool_dispatcher import dispatch as dispatch_tool
 
 router = APIRouter(prefix="/api", tags=["api"])
 
 
-class ToolRunRequest(BaseModel):
-    """Request body for POST /api/tools/run. Dashboards (e.g. ElevenLabs webhook) send tool_name + parameters."""
-
-    tool_name: str = Field(..., description="Name of the tool to run (e.g. lookup_customer, create_ticket)")
-    parameters: dict = Field(default_factory=dict, description="Tool arguments")
-    call_sid: str = Field(default="", description="Optional call/session ID for context")
-    from_number: str = Field(default="", description="Optional caller number")
-    to_number: str = Field(default="", description="Optional called number")
+class AgentRunRequest(BaseModel):
+    """Request body for POST /api/agent/run. Dashboards (e.g. ElevenLabs webhook) send agent_name + parameters."""
+    agent_name: str = Field(..., description="Name of the agent to run (e.g. support_agent, customer_agent, IT_support_agent)")
+    parameters: dict = Field(default_factory=dict, description="Agent arguments")
+    request: str = Field(..., description="Request to the agent")
 
 
-class ToolRunResponse(BaseModel):
+class AgentRunResponse(BaseModel):
     result: str
     is_error: bool = False
 
@@ -29,9 +26,9 @@ async def health():
     return {"status": "ok"}
 
 
-@router.post("/tools/run", response_model=ToolRunResponse)
-async def tools_run(
-    body: ToolRunRequest,
+@router.post("/agent/run", response_model=AgentRunResponse)
+async def agent_run(
+    body: AgentRunRequest,
     x_call_sid: str | None = Header(None, alias="X-Call-Sid"),
     x_from: str | None = Header(None, alias="X-From"),
     x_to: str | None = Header(None, alias="X-To"),
@@ -46,8 +43,8 @@ async def tools_run(
         to_number=body.to_number or x_to or "",
     )
     try:
-        result = await dispatch_tool(body.tool_name, body.parameters, context)
+        result = await invoke_agent(body, context)
         is_error = result.startswith("Error:") if isinstance(result, str) else False
-        return ToolRunResponse(result=result, is_error=is_error)
+        return AgentRunResponse(result=result, is_error=is_error)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
