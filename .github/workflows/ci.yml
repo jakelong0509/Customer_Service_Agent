@@ -1,0 +1,37 @@
+# Build the app image and run pytest inside it (same environment as production).
+name: CI
+
+on:
+  push:
+    branches: [main, dev]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test-docker:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: elevenlabs-customer-service-agent
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build image (with GitHub Actions cache for layers)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: false
+          load: true
+          tags: customer-service-agent:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Run tests in container
+        run: docker run --rm customer-service-agent:ci pytest -q tests/

@@ -7,4 +7,3 @@ class CallContext(BaseModel):
 
     call_sid: str = Field(default="", description="Call or session ID")
     from_number: str = Field(default="", description="Caller phone number")
-    to_number: str = Field(default="", description="Called number")

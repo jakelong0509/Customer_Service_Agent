@@ -6,9 +6,10 @@ at import time without manual bookkeeping.
 from __future__ import annotations
 
 from typing import Any, Dict, Iterator, Optional, Type
+from src.core.agent_base import AgentBase
 
 # Agent implementation type: any class used as an agent (subclassing optional).
-AgentType = Type[Any]
+AgentType = Type[AgentBase]
 
 
 class AgentRegistry:

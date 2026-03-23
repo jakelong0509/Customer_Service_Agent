@@ -3,9 +3,9 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 
-from app.api.routes import router as api_router
-from app.infrastructure.database import close_pool, init_pool
-from app.infrastructure.redis import close_redis, init_redis
+from api.routes import router as api_router
+from src.infrastructure.database import close_pool, init_pool
+from src.infrastructure.redis import close_redis, init_redis
 
 
 @asynccontextmanager

@@ -4,7 +4,7 @@ from typing import AsyncGenerator
 
 import asyncpg
 
-from app.config import get_settings
+from src.core.config import get_settings
 
 _pool: asyncpg.Pool | None = None
 

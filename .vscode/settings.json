@@ -11,6 +11,16 @@
       "path": "elevenlabs-customer-service-agent/agents",
       "envManager": "ms-python.python:conda",
       "packageManager": "ms-python.python:conda"
+    },
+    {
+      "path": "elevenlabs-customer-service-agent/app/services",
+      "envManager": "ms-python.python:conda",
+      "packageManager": "ms-python.python:conda"
+    },
+    {
+      "path": "elevenlabs-customer-service-agent/app/DAL",
+      "envManager": "ms-python.python:conda",
+      "packageManager": "ms-python.python:conda"
     }
   ]
 }

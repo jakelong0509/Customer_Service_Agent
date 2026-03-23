@@ -4,7 +4,7 @@ from typing import Any
 
 from redis.asyncio import Redis
 
-from app.config import get_settings
+from src.core.config import get_settings
 
 _client: Redis | None = None
 

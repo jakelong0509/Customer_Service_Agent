@@ -30,4 +30,12 @@ class Settings(BaseSettings):
 
 
 def get_settings() -> Settings:
-    return Settings()
+    settings = Settings()
+    settings.database_url = os.getenv("POSTGRES_CONNECTION_STRING")
+    settings.redis_host = os.getenv("REDIS_HOST")
+    settings.redis_port = int(os.getenv("REDIS_PORT"))
+    settings.redis_username = os.getenv("REDIS_USERNAME")
+    settings.redis_password = os.getenv("REDIS_PASSWORD")
+    settings.log_level = os.getenv("LOG_LEVEL")
+    settings.environment = os.getenv("ENVIRONMENT")
+    return settings
