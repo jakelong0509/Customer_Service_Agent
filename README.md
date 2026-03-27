@@ -1,2 +1,2 @@
-# Customer_Service_Agent
-Customer Service AI agent, communicate with user through phone (ElevenLabs)
+# Clinical AI Agent
+Clinical AI Agent, communicate with user through phone (ElevenLabs), Emails and ChatBot
