@@ -1,4 +1,4 @@
-from src.agents.customer_support_agent.agent import agent_voice
+from src.agents.customer_support_agent.agent import get_agent_voice
 from src.core.agent_run_request_model import AgentRunRequest
 from src.core.conversation import CallContext
 from src.core.customer import CustomerModel
@@ -19,9 +19,8 @@ if __name__ == "__main__":
     request=(
       "TASK: appointments | Peer asks what is required before create_appointment may be called. "
       "Reply with STATUS and MISSING_FIELDS only."
-    ),
+    ),call_sid="test-call-no-customer", caller_phone_number=""
   )
-  _ctx_empty = CallContext(call_sid="test-call-no-customer", from_number="")
   _customer_empty = CustomerModel(
     id="",
     phone="",
@@ -31,16 +30,15 @@ if __name__ == "__main__":
     status="",
   )
   print("--- run 1: no customer information (empty CustomerModel) ---")
-  print(agent_voice.run(_req_base, _ctx_empty, _customer_empty))
+  print(get_agent_voice().run(_req_base, _customer_empty))
 
   _req_with_customer = AgentRunRequest(
     agent_name="customer_support_agent",
     request=(
       "TASK: appointments | customer_id=cust-422 | scheduled_at=2099-01-15T15:00:00Z | "
       "subject=billing review | status=scheduled | notes=from peer agent test"
-    ),
+    ),call_sid="test-call-with-customer", caller_phone_number="+15551234567"
   )
-  _ctx_filled = CallContext(call_sid="test-call-with-customer", from_number="+15551234567")
   _customer_filled = CustomerModel(
     id="cust-422",
     phone="+15551234567",
@@ -50,4 +48,4 @@ if __name__ == "__main__":
     status="active",
   )
   print("--- run 2: with customer information ---")
-  print(agent_voice.run(_req_with_customer, _ctx_filled, _customer_filled))
+  print(get_agent_voice().run(_req_with_customer, _customer_filled))

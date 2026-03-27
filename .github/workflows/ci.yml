@@ -26,7 +26,8 @@ jobs:
       - name: Build image (with GitHub Actions cache for layers)
         uses: docker/build-push-action@v6
         with:
-          context: .
+          context: elevenlabs-customer-service-agent
+          file: elevenlabs-customer-service-agent/Dockerfile
           push: false
           load: true
           tags: customer-service-agent:ci

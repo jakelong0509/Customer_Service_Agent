@@ -7,7 +7,7 @@ from typing import Any, Callable, List, Annotated, Literal
 
 from langgraph.runtime import Runtime
 from src.core.agent_base import AgentBase
-from langchain_core.messages import SystemMessage, HumanMessage
+from langchain_core.messages import SystemMessage, HumanMessage, ToolMessage
 from langgraph.graph import StateGraph, START, END
 from langgraph.graph.message import add_messages
 from pydantic import BaseModel
@@ -21,26 +21,34 @@ from src.core.agent_run_request_model import AgentRunRequest
 from src.core.conversation import CallContext
 from src.services.agent_registry import register_agent
 from langchain_openai import ChatOpenAI
-from .tools import create_appointment
 from dotenv import load_dotenv
 from src.services.agent_registry import AgentType, get_agent_registry
 from datetime import datetime
+from src.skills.skill_registry import SkillRecord, get_skills, get_skill_tools
+from src.agents.shared_tools.skill_tools import activate_skill, deactivate_skill
+from langchain_core.tools import tool
+from langgraph.types import Command
 load_dotenv()
 
 class CustomerSupportAgentState(BaseModel):
   messages: Annotated[list, add_messages]
+  skills: dict[str, SkillRecord]
+  
 
 @register_agent("customer_support_agent")
 class CustomerSupportAgent(AgentBase):
-  def __init__(self, system_prompt: str, llm: Any, tools: List[Callable], db_uri: str, type: Literal["voice", "chat", "email"]):
+  def __init__(self, system_prompt: str, llm: Any, tools: List[Callable], db_uri: str, type: Literal["voice", "chat", "email"], skill_names: List[str]):
     super().__init__()
     self.system_prompt = system_prompt
     self.llm = llm
-    self.tools = tools
+    self.base_tools = tools + [activate_skill, deactivate_skill]
+    self.skill_tools = []
+    self.toolNode = ToolNode(self.base_tools)
     self.type = type
-    self.llm_with_tools = self.llm.bind_tools(self.tools)
-    self.tool_node = ToolNode(self.tools)
     self.db_uri = db_uri
+    self.skill_names = skill_names
+    # reload the skills by skill names, the skill objects include the tools and the skill body.
+    self.skills = get_skills(self.skill_names)
     self.checkpointer = InMemorySaver()
     # from_conn_string is @contextmanager — the call returns a context manager, not PostgresStore.
     # __enter__() yields the real store; keep the CM alive so the DB connection stays open.
@@ -65,8 +73,14 @@ class CustomerSupportAgent(AgentBase):
 
   async def arun(self, request: AgentRunRequest, customer: CustomerModel) -> str:
     """Run the graph with async tool support (await ainvoke). Use from FastAPI/async code."""
+    self.skill_tools = []
+    self.toolNode = ToolNode(self.base_tools)
+    self.skills = get_skills(self.skill_names)
     result = await self.support_agent.ainvoke(
-      {"messages": [HumanMessage(content=request.request)]},
+      {
+        "messages": [HumanMessage(content=request.request)],
+        "skills": self.skills
+      },
       config={"configurable": {"thread_id": f"Customer_Support_Agent:{self.type}:{request.call_sid}"}},
       context=customer,
     )
@@ -75,6 +89,16 @@ class CustomerSupportAgent(AgentBase):
   def run(self, request: AgentRunRequest, customer: CustomerModel) -> str:
     """Sync entrypoint for scripts/tests only. Prefer arun() inside an async app."""
     return asyncio.run(self.arun(request, customer))
+
+  async def tool_node(self, state: CustomerSupportAgentState) -> dict:
+    response = await self.toolNode.ainvoke(state)
+    if isinstance(response, list) and isinstance(response[-1], Command):
+      return response[-1]
+    else:
+      return Command(
+        update = response,
+        goto = "agent"
+      )
 
   @staticmethod
   def _last_message_text(result: dict) -> str:
@@ -93,8 +117,15 @@ class CustomerSupportAgent(AgentBase):
     customerId = runtime.context.id
     namespace = ("Instruction", "CustomerSupportAgent")
     instruction = runtime.store.get(namespace, customerId)
-    messages = [SystemMessage(content=self.system_prompt.format(learned_instruction = instruction, current_date = datetime.now().strftime("%Y-%m-%d")))] + state.messages
-    response = self.llm_with_tools.invoke(messages)
+    messages = [SystemMessage(content=self.system_prompt.format(learned_instruction = instruction
+    , current_date = datetime.now().strftime("%Y-%m-%d")
+    , available_skills = "\n".join([f"**{skill.name}** - {skill.description}" for skill in self.skills.values() if not skill.active])
+    , active_skills = "\n".join([f"**{skill.name}** - {skill.body}" for skill in self.skills.values() if skill.active])))] + state.messages
+    # Get the active skills tools
+    self.skill_tools = get_skill_tools([skill.name for skill in self.skills.values() if skill.active])
+    # --------------------------------
+    self.toolNode = ToolNode(self.base_tools + self.skill_tools)
+    response = self.llm.bind_tools(self.base_tools + self.skill_tools).invoke(messages)
     return {
       "messages": [response]
     }
@@ -132,14 +163,22 @@ CUSTOMER_SUPPORT_SYSTEM_PROMPT = _SYSTEM_PROMPT_PATH.read_text(encoding="utf-8")
 LLM = ChatOpenAI(model="kimi-k2.5", base_url="https://api.moonshot.ai/v1", temperature=0.6, max_tokens=25000, timeout=None, max_retries=2, extra_body={
         "thinking": {"type": "disabled"}
     })  # Pass additional request body via extra_body parameter to disable thinking
-TOOLS = [create_appointment]
+TOOLS = []
 DB_URI = os.getenv("POSTGRES_CONNECTION_STRING")
 
-agent_voice = CustomerSupportAgent(
-  system_prompt=CUSTOMER_SUPPORT_SYSTEM_PROMPT,
-  llm=LLM,
-  tools=TOOLS,
-  db_uri=DB_URI,
-  type="voice"
-)
+_agent_voice: CustomerSupportAgent | None = None
 
+
+def get_agent_voice() -> CustomerSupportAgent:
+  """Lazy singleton so importing this module does not open Postgres (pytest collection, CI)."""
+  global _agent_voice
+  if _agent_voice is None:
+    _agent_voice = CustomerSupportAgent(
+      system_prompt=CUSTOMER_SUPPORT_SYSTEM_PROMPT,
+      llm=LLM,
+      tools=TOOLS,
+      db_uri=DB_URI or "",
+      type="voice",
+      skill_names=["appointment_booking_skill"],
+    )
+  return _agent_voice

@@ -7,7 +7,7 @@ from src.core.conversation import CallContext
 from src.infrastructure.redis import get_call_state, set_call_state, delete_call_state
 from src.services.agent_registry import AgentType, get_agent_registry
 from src.core.agent_run_request_model import AgentRunRequest
-from src.agents.customer_support_agent.agent import agent_voice
+from src.agents.customer_support_agent.agent import get_agent_voice
 from src.core.customer import CustomerModel
 logger = logging.getLogger(__name__)
 
@@ -91,7 +91,7 @@ class AgentResponse:
 
 async def invoke_agent(request: AgentRunRequest, customer: CustomerModel) -> str:
     """Invoke an agent with the given parameters, request, and context."""
-    agent = agent_voice
+    agent = get_agent_voice()
     if not agent:
         raise ValueError(f"Agent {request.agent_name} not found")
     return await agent.arun(request, customer)

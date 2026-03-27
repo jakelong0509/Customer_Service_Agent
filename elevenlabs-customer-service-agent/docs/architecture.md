@@ -6,7 +6,7 @@ This system is a **voice AI customer service backend** that exposes HTTP tools f
 
 **Key Capabilities:**
 - Handle voice call tool requests from ElevenLabs
-- Customer/order/ticket management (PostgreSQL)
+- Customer profiles and **appointment scheduling** data in PostgreSQL (providers, slots, resource bookings)
 - Active call state caching (Redis)
 - Document-based Q&A via RAG (MinIO + Milvus)
 - Async tool handling for long operations
@@ -22,10 +22,10 @@ This system is a **voice AI customer service backend** that exposes HTTP tools f
 └───────────────────────────┬─────────────────────────────────────┘
                             │ HTTPS
                             ▼
-┌─────────────────────────────────────────────────────────────────┐
-│                    Single API Server                            │
+┌────────────────────────────────────────────────────────────────┐
+│                    Single API Server                           │
 │  ┌─────────────────────────────────────────────────────────┐   │
-│  │              FastAPI Application                          │   │
+│  │              FastAPI Application                        │   │
 │  │  ┌─────────────┐  ┌─────────────┐  ┌─────────────────┐  │   │
 │  │  │ API Routes  │  │   Tools     │  │  RAG Handler    │  │   │
 │  │  │ - /health   │  │ - Customer  │  │ - Query Milvus  │  │   │
@@ -33,20 +33,20 @@ This system is a **voice AI customer service backend** that exposes HTTP tools f
 │  │  │             │  │ - Handoff   │  │ - Response      │  │   │
 │  │  └─────────────┘  └─────────────┘  └─────────────────┘  │   │
 │  └─────────────────────────────────────────────────────────┘   │
-│                            │                                    │
+│                            │                                   │
 │  ┌─────────────────────────┼─────────────────────────────────┐ │
 │  │         Data Layer      │                                 │ │
-│  │  ┌──────────┐  ┌───────┴──┐  ┌──────────┐  ┌──────────┐ │ │
-│  │  │PostgreSQL│  │  Redis   │  │  Milvus  │  │  MinIO   │ │ │
-│  │  │(Primary) │  │(Session │  │(Vector  │  │(Documents│ │ │
-│  │  │-customers│  │  Cache)  │  │ Database)│  │  Store)  │ │ │
-│  │  │-orders   │  │-active   │  │-chunks   │  │-PDFs     │ │ │
-│  │  │-tickets  │  │ callers  │  │-embeds   │  │-Word     │ │ │
-│  │  │-refunds  │  │-temp     │  │          │  │-Text     │ │ │
-│  │  │-logs     │  │ state    │  │          │  │          │ │ │
-│  │  └──────────┘  └──────────┘  └──────────┘  └──────────┘ │ │
+│  │  ┌──────────┐  ┌───────┴──┐  ┌──────────┐  ┌──────────┐   │ │
+│  │  │PostgreSQL│  │  Redis   │  │  Milvus  │  │  MinIO   │   │ │
+│  │  │(Primary) │  │(Session  │  │(Vector   │  │(Documents│   │ │
+│  │  │-customers│  │  Cache)  │  │ Database)│  │  Store)  │   │ │
+│  │  │-providers│  │-active   │  │-chunks   │  │-PDFs     │   │ │
+│  │  │-appts + │  │ callers  │  │-embeds   │  │-Word     │   │ │
+│  │  │ bookings│  │-temp     │  │          │  │-Text     │   │ │
+│  │  │-logs     │  │ state    │  │          │  │          │   │ │
+│  │  └──────────┘  └──────────┘  └──────────┘  └──────────┘   │ │
 │  └───────────────────────────────────────────────────────────┘ │
-└─────────────────────────────────────────────────────────────────┘
+└────────────────────────────────────────────────────────────────┘
 ```
 
 ---
@@ -90,11 +90,11 @@ ElevenLabs → POST /api/tools/run
 
 **Tables:**
 - `customers` - Caller profiles, contact info
-- `orders` - Purchase history, order status
-- `tickets` - Support cases, issue tracking
-- `refund_requests` - Refund processing status
+- `providers` - Bookable resources (doctors, nurses, rooms, equipment)
+- `slot_templates` - 30-minute start times (lunch hour omitted from templates)
+- `appointments` - Booked visits (`scheduled_at`, status, notes)
+- `appointment_resource_bookings` - Per-resource slot reservations (created on confirm; unique per provider/date/slot prevents double booking)
 - `callback_requests` - Scheduled callbacks
-- `appointments` - Booked appointments
 - `tool_logs` - JSONB logs of all tool executions
 - `documents` - Metadata linking to MinIO files
 
@@ -111,7 +111,7 @@ ElevenLabs → POST /api/tools/run
 Call Starts:
   PostgreSQL ──▶ Redis (active:call_sid)
                       ├─ customer info
-                      ├─ order context
+                      ├─ customer / appointment context
                       ├─ conversation state
                       └─ TTL: 1 hour
 
@@ -196,7 +196,8 @@ async def lookup_customer(arguments: dict, context: CallContext) -> str:
 | Category | Tools |
 |----------|-------|
 | **Customer** | `lookup_customer`, `get_account_info` |
-| **Support** | `create_ticket`, `check_refund_eligibility`, `request_refund` |
+| **Support** | `create_ticket`, `check_refund_eligibility`, `request_refund` (stubs; no backing tables in current schema) |
+| **Scheduling** | `create_appointment` (writes `appointments`; resource bookings and availability search to be wired in app code) |
 | **Handoff** | `transfer_to_agent`, `schedule_callback` |
 | **RAG** | `query_knowledge_base` |
 
@@ -272,17 +273,17 @@ Caller: "What's the return policy?"
 
 ## Handling Long Operations (30+ seconds)
 
-**Problem:** Some tools (refunds, complex lookups) take >30s
+**Problem:** Some tools (e.g. heavy integrations, batch eligibility checks) take >30s
 **Solution:** Async pattern with ElevenLabs conversation management
 
 ```
-Scenario: Processing a refund takes 2 minutes
+Scenario: A long-running tool job (e.g. external scheduling API) takes 2 minutes
 
 ElevenLabs                    Our API
 ──────────                    ───────
    │                             │
    │──POST /tools/run───────────▶│
-   │  {tool: "request_refund"}   │
+   │  {tool: "slow_operation"}  │
    │                             │
    │◀───Immediate Response──────│
    │  {"result": "Processing...", │
@@ -291,11 +292,11 @@ ElevenLabs                    Our API
    │                             │
    │                             │──┐
    │                             │  │ Background Worker
-   │                             │◀─┘ Process refund (2 min)
+   │                             │◀─┘ Complete job
    │                             │
    │──Polling GET /jobs/job-123─▶│
    │◀───{"status": "complete",    │
-   │     "result": "Refund approved"}
+   │     "result": "Done"}       │
    │                             │
    │──Continue conversation─────▶│
 ```
@@ -417,7 +418,7 @@ app/
 ├── tools/
 │   ├── registry.py         # Tool registration system
 │   ├── customer_tools.py   # Customer lookup tools
-│   ├── support_tools.py    # Ticket/refund tools
+│   ├── support_tools.py    # Support stubs (tickets/refunds)
 │   ├── handoff_tools.py    # Transfer/callback tools
 │   └── rag_tools.py        # Knowledge base query
 ├── models/
