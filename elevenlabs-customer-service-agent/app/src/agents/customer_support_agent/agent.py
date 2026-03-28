@@ -3,6 +3,8 @@ from __future__ import annotations
 import asyncio
 import os
 import sys
+import json
+
 from typing import Any, Callable, List, Annotated, Literal
 
 from langgraph.runtime import Runtime
@@ -41,14 +43,12 @@ class CustomerSupportAgent(AgentBase):
     super().__init__()
     self.system_prompt = system_prompt
     self.llm = llm
+    self.skill_names = skill_names
     self.base_tools = tools + [activate_skill, deactivate_skill]
-    self.skill_tools = []
-    self.toolNode = ToolNode(self.base_tools)
+    self.toolNode = ToolNode(self.base_tools + get_skill_tools(self.skill_names))
     self.type = type
     self.db_uri = db_uri
-    self.skill_names = skill_names
     # reload the skills by skill names, the skill objects include the tools and the skill body.
-    self.skills = get_skills(self.skill_names)
     self.checkpointer = InMemorySaver()
     # from_conn_string is @contextmanager — the call returns a context manager, not PostgresStore.
     # __enter__() yields the real store; keep the CM alive so the DB connection stays open.
@@ -73,17 +73,29 @@ class CustomerSupportAgent(AgentBase):
 
   async def arun(self, request: AgentRunRequest, customer: CustomerModel) -> str:
     """Run the graph with async tool support (await ainvoke). Use from FastAPI/async code."""
-    self.skill_tools = []
-    self.toolNode = ToolNode(self.base_tools)
-    self.skills = get_skills(self.skill_names)
-    result = await self.support_agent.ainvoke(
-      {
-        "messages": [HumanMessage(content=request.request)],
-        "skills": self.skills
-      },
-      config={"configurable": {"thread_id": f"Customer_Support_Agent:{self.type}:{request.call_sid}"}},
-      context=customer,
-    )
+    thread_id = f"Customer_Support_Agent:{self.type}:{request.call_sid}"
+    config = {"configurable": {"thread_id": thread_id}}
+    
+    existing_state = self.support_agent.get_state(config=config)
+    has_existing_state = existing_state is not None and bool(existing_state.values)
+
+    if not has_existing_state:
+      result = await self.support_agent.ainvoke(
+        {
+          "messages": [HumanMessage(content=request.request)],
+          "skills": get_skills(self.skill_names)
+        },
+        config=config,
+        context=customer,
+      )
+    else:
+       result = await self.support_agent.ainvoke(
+        {
+            "messages": [HumanMessage(content=request.request)]
+        },
+        config=config,
+        context=customer,
+      )
     return self._last_message_text(result)
 
   def run(self, request: AgentRunRequest, customer: CustomerModel) -> str:
@@ -117,15 +129,15 @@ class CustomerSupportAgent(AgentBase):
     customerId = runtime.context.id
     namespace = ("Instruction", "CustomerSupportAgent")
     instruction = runtime.store.get(namespace, customerId)
+    skills = state.skills
     messages = [SystemMessage(content=self.system_prompt.format(learned_instruction = instruction
     , current_date = datetime.now().strftime("%Y-%m-%d")
-    , available_skills = "\n".join([f"**{skill.name}** - {skill.description}" for skill in self.skills.values() if not skill.active])
-    , active_skills = "\n".join([f"**{skill.name}** - {skill.body}" for skill in self.skills.values() if skill.active])))] + state.messages
+    , available_skills = json.dumps([{"name": skill.name, "description": skill.description} for skill in skills.values() if not skill.active])
+    , active_skills = json.dumps([{"name": skill.name, "body": skill.body} for skill in skills.values() if skill.active])))] + state.messages
     # Get the active skills tools
-    self.skill_tools = get_skill_tools([skill.name for skill in self.skills.values() if skill.active])
+    skill_tools = get_skill_tools([skill.name for skill in skills.values() if skill.active])
     # --------------------------------
-    self.toolNode = ToolNode(self.base_tools + self.skill_tools)
-    response = self.llm.bind_tools(self.base_tools + self.skill_tools).invoke(messages)
+    response = self.llm.bind_tools(self.base_tools + skill_tools).invoke(messages)
     return {
       "messages": [response]
     }
