@@ -4,8 +4,10 @@ from langchain.tools import InjectedState, tool, InjectedToolCallId
 from pydantic import BaseModel
 from langgraph.types import Command
 from langchain_core.messages import ToolMessage
-  
+from src.services.tool_registry import register_tool
+
 @tool
+@register_tool("activate_skill")
 async def activate_skill(
   skill_name: str
   , state: Annotated[BaseModel, InjectedState]
@@ -24,6 +26,7 @@ async def activate_skill(
   return f"Skill '{skill_name}' not found"
 
 @tool
+@register_tool("deactivate_skill")
 async def deactivate_skill(skill_name: str
 , state: Annotated[BaseModel, InjectedState]
 , tool_call_id: Annotated[str, InjectedToolCallId]

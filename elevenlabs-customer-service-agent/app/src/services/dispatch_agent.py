@@ -7,7 +7,7 @@ from src.core.conversation import CallContext
 from src.infrastructure.redis import get_call_state, set_call_state, delete_call_state
 from src.services.agent_registry import AgentType, get_agent_registry
 from src.core.agent_run_request_model import AgentRunRequest
-from src.agents.customer_support_agent.agent import get_agent_voice
+from src.services.agent_registry import get_agent
 from src.core.customer import CustomerModel
 logger = logging.getLogger(__name__)
 
@@ -89,11 +89,11 @@ class AgentResponse:
 #     await set_call_state(call_sid, json.dumps(initial_state), ttl_seconds=CALL_STATE_TTL)
 #     logger.info(f"Call initialized: {call_sid} from {from_number}")
 
-async def invoke_agent(request: AgentRunRequest, customer: CustomerModel) -> str:
+async def invoke_agent(agent_name: str, request: AgentRunRequest, customer: CustomerModel, session_id: str) -> str:
     """Invoke an agent with the given parameters, request, and context."""
-    agent = get_agent_voice()
+    agent = get_agent(agent_name)
     if not agent:
         raise ValueError(f"Agent {request.agent_name} not found")
-    return await agent.arun(request, customer)
+    return await agent.arun(request, customer, session_id)
 
 

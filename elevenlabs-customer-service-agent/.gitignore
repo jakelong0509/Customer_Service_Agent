@@ -34,3 +34,6 @@ build/
 # Logs
 *.log
 logs/
+
+# Config
+app/agent_configs.json

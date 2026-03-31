@@ -5,12 +5,20 @@ at import time without manual bookkeeping.
 """
 from __future__ import annotations
 
-from typing import Any, Dict, Iterator, Optional, Type
+from typing import Any, Dict, Iterator, Optional, Type, List
 from src.core.agent_base import AgentBase
+from src.agents.agent_factory import AgentFactory
+import json
+from src.core.agent_config import AgentConfig, load_agent_configs
+from pathlib import Path
+from langchain_openai import ChatOpenAI
+import os
+from dotenv import load_dotenv
+load_dotenv()
 
 # Agent implementation type: any class used as an agent (subclassing optional).
 AgentType = Type[AgentBase]
-
+AGENTS = {}
 
 class AgentRegistry:
     """Maps logical agent names to agent classes."""
@@ -76,3 +84,28 @@ def register_agent(name: Optional[str] = None, *, registry: Optional[AgentRegist
         return agent_cls
 
     return decorator
+
+
+def create_agent() -> AgentFactory:
+  agent_configs = load_agent_configs()
+  for agent_config in agent_configs:
+    system_prompt = Path(agent_config["system_prompt_path"]).read_text()
+    llm = ChatOpenAI(model=agent_config["llm"], base_url="https://api.moonshot.ai/v1", temperature=0.6, max_tokens=25000, timeout=None, max_retries=2, extra_body={
+        "thinking": {"type": "disabled"}
+    })
+    db_uri = os.getenv(agent_config["db_uri"])
+    agent_cls = AgentFactory(
+      system_prompt=system_prompt,
+      name=agent_config["name"],
+      llm=llm,
+      tools=agent_config["tools"],
+      db_uri=db_uri,
+      skill_names=agent_config["skill_names"],
+    )
+    AGENTS[agent_config["name"]] = agent_cls
+
+def get_agent(name: str) -> AgentFactory:
+  return AGENTS[name]
+
+def get_agent_names() -> List[str]:
+  return list(AGENTS.keys())
