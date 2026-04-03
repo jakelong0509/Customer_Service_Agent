@@ -22,7 +22,7 @@ async def activate_skill(
   skill = skills[skill_name]
   if skill:
     skill.active = True
-    return Command(update={"messages": [ToolMessage(content="Skill activated", tool_call_id=tool_call_id)], "skills": skills})
+    return Command(update={"messages": [ToolMessage(content="Skill activated", tool_call_id=tool_call_id)]})
   return f"Skill '{skill_name}' not found"
 
 @tool
@@ -40,5 +40,5 @@ async def deactivate_skill(skill_name: str
   skill = skills[skill_name]
   if skill:
     skill.active = False
-    return Command(update={"messages": [ToolMessage(content="Skill deactivated", tool_call_id=tool_call_id)], "skills": skills})
+    return Command(update={"messages": [ToolMessage(content="Skill deactivated", tool_call_id=tool_call_id)]})
   return f"Skill '{skill_name}' not found"

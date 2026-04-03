@@ -19,6 +19,22 @@ class CustomerDA:
             status=row["status"],
         )
 
+    async def get_customer_by_email_address(self, email_address: str) -> CustomerModel | None:
+        row = await fetchrow(
+            "SELECT id, phone, email, name, plan, status FROM customers WHERE email = $1",
+            email_address,
+        )
+        if row is None:
+            return None
+        return CustomerModel(
+            id=str(row["id"]),
+            phone=row["phone"],
+            email=row["email"],
+            name=row["name"],
+            plan=row["plan"],
+            status=row["status"],
+        )
+
     async def create_customer(self, customer: CustomerModel) -> CustomerModel:
         row = await fetchrow(
             "INSERT INTO customers (phone, email, name, plan, status) VALUES ($1, $2, $3, $4, $5) RETURNING *",
