@@ -37,3 +37,10 @@ logs/
 
 # Config
 app/agent_configs.json
+
+# Docker files
+Dockerfile
+docker-compose.yml
+docker-compose.*.yml
+.dockerignore
+

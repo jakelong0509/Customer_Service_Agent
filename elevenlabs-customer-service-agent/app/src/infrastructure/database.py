@@ -13,6 +13,7 @@ async def init_pool() -> asyncpg.Pool:
     """Create and store the connection pool. Call once at app startup."""
     global _pool
     settings = get_settings()
+    print(settings)
     _pool = await asyncpg.create_pool(
         settings.database_url,
         min_size=1,

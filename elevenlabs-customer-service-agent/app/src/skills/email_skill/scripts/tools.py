@@ -20,6 +20,7 @@ async def _send_email_impl(
     This is NOT a tool - it's called by the tools to avoid tool-calling-tool issues.
     """
     try:
+        # Create the message
         message = Mail(
             from_email=os.getenv("SENDGRID_FROM_EMAIL"),
             to_emails=to_email,
@@ -27,14 +28,12 @@ async def _send_email_impl(
             html_content=body
         )
         
-        # Add threading headers for proper email conversation
+        # Add threading headers using add_header method
         if in_reply_to:
-            message.headers = message.headers or []
-            message.headers.append(Header("In-Reply-To", in_reply_to))
+            message.add_header(Header("In-Reply-To", in_reply_to))
         
         if references:
-            message.headers = message.headers or []
-            message.headers.append(Header("References", references))
+            message.add_header(Header("References", references))
         
         sendgrid_client = SendGridAPIClient(os.getenv("SENDGRID_API_KEY"))
         response = sendgrid_client.send(message)

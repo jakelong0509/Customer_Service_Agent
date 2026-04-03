@@ -89,7 +89,7 @@ def register_agent(name: Optional[str] = None, *, registry: Optional[AgentRegist
 def create_agent() -> AgentFactory:
   agent_configs = load_agent_configs()
   for agent_config in agent_configs:
-    system_prompt = Path(agent_config["system_prompt_path"]).read_text()
+    system_prompt = Path(Path(__file__).parent.parent.parent / agent_config["system_prompt_path"]).read_text()
     llm = ChatOpenAI(model=agent_config["llm"], base_url="https://api.moonshot.ai/v1", temperature=0.6, max_tokens=25000, timeout=None, max_retries=2, extra_body={
         "thinking": {"type": "disabled"}
     })

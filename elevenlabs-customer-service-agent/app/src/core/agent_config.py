@@ -1,7 +1,8 @@
 from pydantic import BaseModel
 from typing import List
 import json
-
+import os
+from pathlib import Path
 class AgentConfig(BaseModel):
   name: str
   system_prompt: str
@@ -11,6 +12,6 @@ class AgentConfig(BaseModel):
   skill_names: List[str]
 
 def load_agent_configs() -> List[AgentConfig]:
-  with open("agent_configs.json", "r") as f:
-    agent_configs = json.load(f)
-  return agent_configs
+  config_path = Path(__file__).parent.parent.parent / "agent_configs.json"
+  with open(config_path, "r") as f:
+    return json.load(f)
