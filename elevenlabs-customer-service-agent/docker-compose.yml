@@ -21,8 +21,8 @@ services:
     image: postgres:18-alpine
     environment:
       POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: 
-      POSTGRES_DB: 
+      POSTGRES_PASSWORD: admin123
+      POSTGRES_DB: test_db
     ports:
       - "5432:5432"
     healthcheck:
