@@ -20,6 +20,10 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Create .env from secrets
+        run: |
+          echo "POSTGRES_CONNECTION_STRING=${{ secrets.POSTGRES_CONNECTION_STRING }}" > .env
+
       - name: Start services and run tests
         run: |
           # Build and run tests in one command
