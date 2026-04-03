@@ -35,8 +35,6 @@ build/
 *.log
 logs/
 
-# Config
-app/agent_configs.json
 
 # Docker files
 Dockerfile
