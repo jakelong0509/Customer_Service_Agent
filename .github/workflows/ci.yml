@@ -12,6 +12,7 @@ permissions:
 jobs:
   test-docker:
     runs-on: ubuntu-latest
+    environment: dev
     defaults:
       run:
         working-directory: elevenlabs-customer-service-agent
