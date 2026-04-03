@@ -21,8 +21,8 @@ services:
     image: postgres:18-alpine
     environment:
       POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: ZGpkXO8U8L!
-      POSTGRES_DB: Customer_Support_Agent
+      POSTGRES_PASSWORD: 
+      POSTGRES_DB: 
     ports:
       - "5432:5432"
     healthcheck:
