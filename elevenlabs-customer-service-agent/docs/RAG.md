@@ -43,7 +43,7 @@ RAG Output:
 ### Data Sources
 - UMLS: SNOMED CT to ICD-10 mappings
 - Historical coded encounters from `D:\Medical_terms_codes`
-- pgvector embeddings of clinical notes + their codes
+- Milvus (Zilliz) embeddings of clinical notes + their codes
 
 ---
 
@@ -109,6 +109,10 @@ Standardize drug names using RxNORM and check for dangerous interactions.
 
 ### Example Workflow
 ```
+User asks: "What's the generic for Lipitor?"
+Milvus search on STR embedding → returns RXCUI = 301542 (Lipitor)
+Relational query on RXNREL → find ingredient relationship → RXCUI = 1000003 (Atorvastatin)
+
 Input: "Patient on Lipitor 20mg, new prescription for clarithromycin"
 
 RxNORM Mapping:
@@ -205,9 +209,9 @@ Required Elements:
 ## Implementation Roadmap
 
 ### Phase 1: Foundation (Weeks 1-2)
-1. Set up pgvector extension in PostgreSQL
+1. Set up Milvus vector database
 2. Create embedding pipeline (OpenAI or clinical-specific model)
-3. Build base RAG service class
+3. Build base RAG service class (Milvus search → SQL lookup)
 4. Connect to `D:\Medical_terms_codes` data
 
 ### Phase 2: Medical Coding (Weeks 3-4)
@@ -240,7 +244,12 @@ Required Elements:
 
 ### From `D:\Medical_terms_codes`:
 - [ ] UMLS Metathesaurus (MRCONSO, MRSTY, MRREL)
-- [ ] RxNORM (RXNCONSO, RXNREL)
+- [ ] RxNORM — Full table set:
+  - [ ] RXNCONSO (Milvus/Zilliz only — all columns as scalar fields + STR embedded as vector)
+  - [ ] RXNREL (PostgreSQL — concept relationships)
+  - [ ] RXNSAT (PostgreSQL — attributes, NDC codes)
+  - [ ] RXNSTY (PostgreSQL — semantic type classification)
+  - [ ] RXNDOC (PostgreSQL — abbreviation/reference lookup)
 - [ ] ICD-10-CM codes and descriptions
 - [ ] CPT codes (if available)
 - [ ] SNOMED CT (if available separate from UMLS)
@@ -297,6 +306,113 @@ licensed healthcare provider before clinical decisions.
 
 ## Technical Architecture
 
+### RxNorm Tables: Relational DB vs. Vector DB Architecture
+
+The split between relational and vector storage depends on access patterns:
+
+| Storage Type | Use Case |
+|---|---|
+| **Relational DB (SQL)** | Exact lookups, joins, filtering, referential integrity, structured queries |
+| **Vector DB** | Semantic/similarity search on natural language text fields |
+
+#### RXNCONSO — Milvus (Zilliz) Only
+
+The most important table — stored **entirely in Milvus** with all columns as scalar fields. Not duplicated in PostgreSQL.
+
+| Storage | Columns | Rationale |
+|---|---|---|
+| **Milvus (Zilliz)** | `id` (INT64, auto_id PK) + all 18 RXNCONSO columns as scalar fields + `vector` (FLOAT_VECTOR from STR) | `STR` is the only free-text field — embedded as vector. All other columns stored as scalar fields for filtering and direct retrieval. Simple drug lookups never touch PostgreSQL. |
+
+**Typical query flows:**
+```
+Simple lookup — Milvus only:
+User asks: "What is Lipitor 20mg?"
+  → Milvus semantic search with filter='sab=="RXNORM" and tty in ["SCD","SBD"]'
+  → Returns rxcui, str, tty, sab, code directly — no PostgreSQL needed
+
+Generic equivalent — Milvus → PostgreSQL:
+User asks: "What's the generic for Lipitor?"
+  → Milvus semantic search → returns rxcui = 617311
+  → PostgreSQL: RXNREL query on rxcui1 = '617311', rela = 'tradename_of'
+  → Returns: rxcui = 1000003 (Atorvastatin)
+```
+
+#### RXNREL — Relational DB Only
+
+| Storage | Columns | Rationale |
+|---|---|---|
+| **Relational DB** | `RXCUI1, RXAUI1, STYPE1, REL, RXCUI2, RXAUI2, STYPE2, RELA, RUI, SRUI, SAB, SL, RG, DIR, SUPPRESS, CVF` | Purely graph/relational data — traversing "ingredient_of", "has_form", "dose_form_of" relationships. No free-text to embed. Joins on RXCUI1/RXCUI2. |
+
+> **Tip**: If relationship traversal is heavy, consider also storing this in a graph DB (Neo4j) where `(RXCUI1)-[REL:RELA]->(RXCUI2)` maps naturally to nodes and edges.
+
+#### RXNSAT — Relational DB Only
+
+| Storage | Columns | Rationale |
+|---|---|---|
+| **Relational DB** | `RXCUI, LUI, SUI, RXAUI, STYPE, CODE, ATUI, SATUI, ATN, SAB, ATV, SUPPRESS, CVF` | Structured attribute lookups — e.g., "get NDC code (ATN='NDC') for RXCUI=xxx". ATV values are mostly codes/abbreviations, not natural language. Joins via RXCUI/RXAUI. |
+
+#### RXNSTY — Relational DB Only
+
+| Storage | Columns | Rationale |
+|---|---|---|
+| **Relational DB** | `RXCUI, TUI, STN, STY, ATUI, CVF` | Tiny classification table. Used for filtering (e.g., "only return results with STY='Pharmacologic Substance'"). Pure lookup, no semantic search needed. |
+
+#### RXNDOC — Relational DB Only
+
+| Storage | Columns | Rationale |
+|---|---|---|
+| **Relational DB** | `KEY, VALUE, TYPE, EXPL` | Small reference/lookup table. Used to decode abbreviations (e.g., TTY='SCD' → "Semantic Clinical Drug"). No semantic search needed. |
+
+#### Summary Diagram
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                    Milvus / Zilliz (Vector DB)                   │
+│                                                                 │
+│  Collection: rxnorm_concepts (RXNCONSO — full table)            │
+│    id (INT64, auto_id, PK)                                      │
+│    rxcui, rxaui, lui, sui, sab, tty, code, str, lat, ts,       │
+│    stt, ispref, saui, scui, sdui, srl, suppress, cvf           │
+│    vector (FLOAT_VECTOR, dim=1536) — embedded STR field         │
+│                                                                 │
+│  Collection: umls_vectors                                       │
+│    cui (VARCHAR, PK) + vector (FLOAT_VECTOR)                    │
+│                                                                 │
+│  Collection: clinical_note_vectors                              │
+│    note_hash (VARCHAR, PK) + vector (FLOAT_VECTOR)              │
+│                                                                 │
+│  Simple drug lookups return all fields directly from Milvus.    │
+│  Only relationship/attribute queries need PostgreSQL.           │
+└──────────────────────────┬──────────────────────────────────────┘
+                           │ rxcui (join key for relationships/attributes)
+                           ▼
+┌─────────────────────────────────────────────────────────────────┐
+│                    Relational DB (PostgreSQL)                    │
+│                                                                 │
+│  RXNREL  (concept relationships) — brand↔generic, ingredient   │
+│  RXNSAT  (attributes, NDC codes) — billing lookups              │
+│  RXNSTY  (semantic types) — drug classification                 │
+│  RXNDOC  (abbreviation lookup) — decode SAB, TTY, etc.         │
+│                                                                 │
+│  umls_concepts, clinical_note_embeddings (no vectors)           │
+│  drug_interactions                                              │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+#### Key Design Decisions
+
+| Decision | Recommendation |
+|---|---|
+| RXNCONSO storage | **Milvus (Zilliz) only** — full table with all 18 columns as scalar fields + STR embedded as vector. Not stored in PostgreSQL. |
+| PK strategy | `auto_id=True` (INT64) — Milvus generates PK. `rxcui` stored as regular scalar column for joining to PostgreSQL tables. |
+| Only text to embed? | `RXNCONSO.STR` — the only column with natural language suitable for semantic search |
+| Primary join key | `RXCUI` — links Milvus results to RXNREL ↔ RXNSAT ↔ RXNSTY in PostgreSQL |
+| Pre-filtering in Milvus | `SAB, TTY` stored as scalar fields with indexes — filter before search (e.g., `sab=="RXNORM" and tty in ["SCD","SBD"]`) |
+| Other RxNorm tables | **PostgreSQL only** — RXNREL, RXNSAT, RXNSTY, RXNDOC have no text to embed |
+| RXNREL as graph? | If the agent does multi-hop relationship traversal (ingredient → clinical drug → branded drug), a graph DB would outperform SQL for path queries |
+
+---
+
 ### New Components
 
 ```
@@ -335,34 +451,170 @@ app/
     └── RAG.md                      # This file
 ```
 
-### Database Schema Additions
+### Milvus Vector Collections (Zilliz Cloud)
+
+```
+RXNCONSO is stored entirely in Milvus — all 18 columns as scalar fields plus the
+embedded STR vector. Simple drug lookups return all data directly from Milvus
+without touching PostgreSQL.
+
+PK strategy: auto_id (INT64) — Milvus generates the PK. rxcui is a regular scalar
+column used as the join key to PostgreSQL tables (RXNREL, RXNSAT, RXNSTY).
+
+Query flows:
+  Simple lookup:  Milvus search (filtered by sab/tty) → all fields returned directly
+  Generic↔brand:  Milvus → rxcui → PostgreSQL RXNREL → related rxcui → Milvus lookup
+  NDC billing:    Milvus → rxcui → PostgreSQL RXNSAT
+  Drug class:     Milvus → rxcui → PostgreSQL RXNSTY
+```
+
+```python
+from pymilvus import MilvusClient, DataType
+
+# ─── Collection: rxnorm_concepts (full RXNCONSO table) ───
+def create_rxnorm_collection(client: MilvusClient, collection_name: str = "rxnorm_concepts"):
+    if client.has_collection(collection_name):
+        client.drop_collection(collection_name)
+
+    schema = client.create_schema(auto_id=True, enable_dynamic_field=False)
+
+    schema.add_field(field_name="id",       datatype=DataType.INT64,       is_primary=True, auto_id=True)
+    schema.add_field(field_name="rxcui",    datatype=DataType.VARCHAR,     max_length=8)
+    schema.add_field(field_name="rxaui",    datatype=DataType.VARCHAR,     max_length=8)
+    schema.add_field(field_name="lui",      datatype=DataType.VARCHAR,     max_length=8)
+    schema.add_field(field_name="sui",      datatype=DataType.VARCHAR,     max_length=8)
+    schema.add_field(field_name="sab",      datatype=DataType.VARCHAR,     max_length=20)
+    schema.add_field(field_name="tty",      datatype=DataType.VARCHAR,     max_length=10)
+    schema.add_field(field_name="code",     datatype=DataType.VARCHAR,     max_length=20)
+    schema.add_field(field_name="str",      datatype=DataType.VARCHAR,     max_length=500)
+    schema.add_field(field_name="lat",      datatype=DataType.VARCHAR,     max_length=3)
+    schema.add_field(field_name="ts",       datatype=DataType.VARCHAR,     max_length=1)
+    schema.add_field(field_name="stt",      datatype=DataType.VARCHAR,     max_length=3)
+    schema.add_field(field_name="ispref",   datatype=DataType.VARCHAR,     max_length=1)
+    schema.add_field(field_name="saui",     datatype=DataType.VARCHAR,     max_length=20)
+    schema.add_field(field_name="scui",     datatype=DataType.VARCHAR,     max_length=20)
+    schema.add_field(field_name="sdui",     datatype=DataType.VARCHAR,     max_length=20)
+    schema.add_field(field_name="srl",      datatype=DataType.VARCHAR,     max_length=10)
+    schema.add_field(field_name="suppress", datatype=DataType.VARCHAR,     max_length=1)
+    schema.add_field(field_name="cvf",      datatype=DataType.VARCHAR,     max_length=10)
+    schema.add_field(field_name="vector",   datatype=DataType.FLOAT_VECTOR, dim=1536)
+
+    index_params = client.prepare_index_params()
+    index_params.add_index(field_name="vector", index_type="AUTOINDEX", metric_type="COSINE")
+    index_params.add_index(field_name="rxcui")
+    index_params.add_index(field_name="sab")
+    index_params.add_index(field_name="tty")
+    index_params.add_index(field_name="str")
+
+    client.create_collection(collection_name=collection_name, schema=schema, index_params=index_params)
+
+
+# ─── Collection: umls_vectors ───
+def create_umls_collection(client: MilvusClient, collection_name: str = "umls_vectors"):
+    if client.has_collection(collection_name):
+        client.drop_collection(collection_name)
+
+    schema = client.create_schema(auto_id=False, enable_dynamic_field=False)
+    schema.add_field(field_name="cui",       datatype=DataType.VARCHAR,     max_length=8, is_primary=True)
+    schema.add_field(field_name="vector",    datatype=DataType.FLOAT_VECTOR, dim=1536)
+
+    index_params = client.prepare_index_params()
+    index_params.add_index(field_name="vector", index_type="AUTOINDEX", metric_type="COSINE")
+
+    client.create_collection(collection_name=collection_name, schema=schema, index_params=index_params)
+
+
+# ─── Collection: clinical_note_vectors ───
+def create_clinical_note_collection(client: MilvusClient, collection_name: str = "clinical_note_vectors"):
+    if client.has_collection(collection_name):
+        client.drop_collection(collection_name)
+
+    schema = client.create_schema(auto_id=False, enable_dynamic_field=False)
+    schema.add_field(field_name="note_hash", datatype=DataType.VARCHAR,     max_length=64, is_primary=True)
+    schema.add_field(field_name="vector",    datatype=DataType.FLOAT_VECTOR, dim=1536)
+
+    index_params = client.prepare_index_params()
+    index_params.add_index(field_name="vector", index_type="AUTOINDEX", metric_type="COSINE")
+
+    client.create_collection(collection_name=collection_name, schema=schema, index_params=index_params)
+```
+
+### Relational DB Schema (PostgreSQL — RXNCONSO removed, stored in Milvus)
 
 ```sql
--- Vector embeddings for clinical notes
+-- RXNCONSO is stored entirely in Milvus (Zilliz). Not in PostgreSQL.
+-- The following tables are PostgreSQL-only (no vectors, pure relational).
+
+-- Clinical note metadata (vectors stored in Milvus: clinical_note_vectors)
 CREATE TABLE clinical_note_embeddings (
     id SERIAL PRIMARY KEY,
-    note_hash VARCHAR(64) UNIQUE,      -- De-identified
-    embedding VECTOR(1536),          -- OpenAI embedding size
-    icd10_codes TEXT[],                -- Associated codes
+    note_hash VARCHAR(64) UNIQUE,
+    icd10_codes TEXT[],
     cpt_codes TEXT[],
     created_at TIMESTAMP DEFAULT NOW()
 );
 
--- UMLS concept cache
+-- UMLS concept cache (vectors stored in Milvus: umls_vectors)
 CREATE TABLE umls_concepts (
     cui VARCHAR(8) PRIMARY KEY,
     concept_name TEXT,
     semantic_type VARCHAR(10),
-    embedding VECTOR(1536),
     source_vocabularies TEXT[]
 );
 
--- RxNORM concept cache  
-CREATE TABLE rxnorm_concepts (
-    rxcui VARCHAR(8) PRIMARY KEY,
-    concept_name TEXT,
-    concept_type VARCHAR(20),
-    embedding VECTOR(1536)
+-- RXNREL: relational only
+CREATE TABLE rxnorm_relationships (
+    rxcui1 VARCHAR(8),
+    rxaui1 VARCHAR(8),
+    stype1 VARCHAR(10),
+    rel VARCHAR(10),
+    rxcui2 VARCHAR(8),
+    rxaui2 VARCHAR(8),
+    stype2 VARCHAR(10),
+    rela VARCHAR(50),
+    rui VARCHAR(12) PRIMARY KEY,
+    srui VARCHAR(12),
+    sab VARCHAR(20),
+    sl VARCHAR(50),
+    rg VARCHAR(12),
+    dir VARCHAR(1),
+    suppress VARCHAR(1),
+    cvf VARCHAR(10)
+);
+
+-- RXNSAT: relational only
+CREATE TABLE rxnorm_attributes (
+    rxcui VARCHAR(8),
+    lui VARCHAR(8),
+    sui VARCHAR(8),
+    rxaui VARCHAR(8),
+    stype VARCHAR(10),
+    code VARCHAR(20),
+    atui VARCHAR(12) PRIMARY KEY,
+    satui VARCHAR(12),
+    atn VARCHAR(50),
+    sab VARCHAR(20),
+    atv TEXT,
+    suppress VARCHAR(1),
+    cvf VARCHAR(10)
+);
+
+-- RXNSTY: relational only
+CREATE TABLE rxnorm_semantic_types (
+    rxcui VARCHAR(8),
+    tui VARCHAR(10),
+    stn VARCHAR(30),
+    sty VARCHAR(100),
+    atui VARCHAR(12) PRIMARY KEY,
+    cvf VARCHAR(10)
+);
+
+-- RXNDOC: relational only
+CREATE TABLE rxnorm_documentation (
+    key_val VARCHAR(100),
+    value_val TEXT,
+    type_val VARCHAR(10),
+    expl TEXT
 );
 
 -- Drug interaction cache
@@ -370,14 +622,19 @@ CREATE TABLE drug_interactions (
     id SERIAL PRIMARY KEY,
     drug1_rxcui VARCHAR(8),
     drug2_rxcui VARCHAR(8),
-    severity VARCHAR(20),             -- SEVERE/MODERATE/MINOR
+    severity VARCHAR(20),
     description TEXT,
     mechanism TEXT
 );
 
--- Create indexes for similarity search
-CREATE INDEX ON clinical_note_embeddings USING ivfflat (embedding vector_cosine_ops);
-CREATE INDEX ON umls_concepts USING ivfflat (embedding vector_cosine_ops);
+-- Relational indexes (rxnorm_concepts NOT in PostgreSQL — lives in Milvus)
+CREATE INDEX ON rxnorm_relationships (rxcui1);
+CREATE INDEX ON rxnorm_relationships (rxcui2);
+CREATE INDEX ON rxnorm_relationships (rel);
+CREATE INDEX ON rxnorm_relationships (rela);
+CREATE INDEX ON rxnorm_attributes (rxcui);
+CREATE INDEX ON rxnorm_attributes (atn);
+CREATE INDEX ON rxnorm_semantic_types (rxcui);
 ```
 
 ---
@@ -404,8 +661,8 @@ CREATE INDEX ON umls_concepts USING ivfflat (embedding vector_cosine_ops);
 ## Next Steps
 
 1. **Verify data access** to `D:\Medical_terms_codes`
-2. **Install pgvector** extension in PostgreSQL
+2. **Set up Milvus** vector database
 3. **Choose embedding model** (OpenAI vs clinical-specific like BioBERT)
 4. **Select first use case** (recommend: medical coding)
-5. **Build MVP** with single RAG pipeline
+5. **Build MVP** with single RAG pipeline (Milvus → SQL join)
 

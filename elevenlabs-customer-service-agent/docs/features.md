@@ -88,7 +88,7 @@ This document outlines the key features and capabilities that are highly valued 
 - ❌ Document chunking strategies
 - ❌ Semantic search
 
-**Note**: This would require adding a vector store (e.g., pgvector, Pinecone) and embedding pipeline.
+**Note**: This would require adding a vector store (e.g., pgvector, Pinecone) and embedding pipeline. A planned product use case is **Form Assistant** (section 14): retrieve approved sources, draft form fields, human confirmation.
 
 **Technologies**: Pinecone, Weaviate, Chroma, pgvector, LangChain RAG
 
@@ -190,38 +190,49 @@ This document outlines the key features and capabilities that are highly valued 
 
 ---
 
-## 10. ❌ Testing & Evaluation
+## 10. 🔄 Testing & Evaluation
 
-**Status**: Not implemented
+**Status**: Partial - CI pipeline with tests implemented
+
+**Implemented**:
+- ✅ Integration tests for agents (`tests/integration/test_agent.py`)
+- ✅ CI pipeline with automated test execution
+- ✅ Docker Compose test environment with PostgreSQL
 
 **Not Implemented**:
 - ❌ Unit tests for tools
-- ❌ Integration tests for agents
 - ❌ Prompt testing framework
 - ❌ Output evaluation metrics
+- ❌ Test coverage reporting
 
-**Note**: `requirements.txt` includes pytest but no test files exist.
+**Key Files**:
+- `tests/integration/test_agent.py`
+- `tests/unit/test_smoke.py`
+- `.github/workflows/ci.yml`
 
-**Technologies**: pytest, Promptfoo
+**Technologies**: pytest, GitHub Actions, Docker Compose, PostgreSQL
 
 ---
 
 ## 11. 🔄 Deployment & Scaling
 
-**Status**: Partial - Docker-ready but not productionized
+**Status**: Partial - CI completed with Docker Compose, CD pending
 
 **Implemented**:
 - ✅ Environment-based configuration (.env)
 - ✅ Dependency management (requirements.txt)
 - ✅ Health check endpoint
+- ✅ Docker containerization (Dockerfile + docker-compose.yml)
+- ✅ CI pipeline with GitHub Actions (Docker Compose, PostgreSQL service container)
+- ✅ Automated testing on push/PR
 
 **Not Implemented**:
-- ❌ Docker containerization
+- ❌ CD pipeline (deployment automation) - *planned for later*
 - ❌ Kubernetes manifests
 - ❌ Auto-scaling configuration
 - ❌ Load balancing setup
 
-**Technologies**: Docker, Kubernetes (would be added)
+**Technologies**: Docker, Docker Compose, GitHub Actions, PostgreSQL (test DB), pytest
 
 ---
 
@@ -247,6 +258,51 @@ This document outlines the key features and capabilities that are highly valued 
 
 ---
 
+## 13. ❌ After-Call Work Packet (Structured Handoff)
+
+**Status**: Not implemented (foundations exist: email skill, `tool_logs`, conversation memory)
+
+**Purpose**: Reduce post-call manual work by turning the conversation into a **structured handoff**—what was promised, callback reason, issues in order, and next steps—so staff do not re-type the same information.
+
+**Planned**:
+- ❌ Trigger on call end or on-demand (e.g. dedicated tool / webhook)
+- ❌ LLM **structured output** (JSON schema) for summary fields: intent, commitments, open items, sentiment, suggested priority
+- ❌ Persist handoff record (PostgreSQL) linked to `call_sid` / customer / thread
+- ❌ Delivery channels: **SendGrid** email to queue, optional **CRM/ticketing webhook** (Zendesk, HubSpot, etc.)
+- ❌ Include last *N* turns + key **tool results** + customer context in the summarization payload
+
+**Real-world problem**: Warm transfers and follow-ups fail when humans lack thread context; structured packets cut handle time and error rate.
+
+**Key Files (existing)**:
+- `app/src/skills/email_skill/scripts/tools.py`
+- `tool_logs` / conversation storage (see Memory & database docs)
+
+**Technologies**: Structured generation (JSON mode / Pydantic), SendGrid, HTTP webhooks, PostgreSQL
+
+---
+
+## 14. ❌ Form Assistant (RAG-Grounded Draft + Human Confirm)
+
+**Status**: Not implemented (**depends on RAG**, see section 4)
+
+**Purpose**: Assist with high-friction forms (insurance, employer, clinic intake, internal requests) by **retrieving** grounded snippets from approved documents, **drafting** field values from chart or call context, and **flagging** low-confidence items for **human sign-off**—not unsupervised auto-submit.
+
+**Planned**:
+- ❌ **Retrieve** relevant policy / clinic rules / field definitions from the vector store (same pipeline as section 4)
+- ❌ **Draft** structured field proposals with **source citations** (chunk IDs or doc + section)
+- ❌ **Confidence / review flags** for fields that need clinician or staff confirmation
+- ❌ **Audit log**: query, retrieved sources, draft output, and human accept/reject (aligns with compliance-oriented RAG patterns)
+
+**Real-world problem**: Duplicate data entry and ambiguous third-party forms drive administrative load; grounded drafts reduce time while keeping a human in the loop.
+
+**Depends on**:
+- Section 4 RAG (vector DB, chunking, embeddings, semantic search)
+- Optional: section 13 for packaging conversation context into a handoff or draft request
+
+**Technologies**: pgvector / Milvus / Pinecone (per section 4), LangChain RAG, structured output, document store (e.g. MinIO)
+
+---
+
 ## Summary: What's Built
 
 | Category | Status | Completion |
@@ -260,11 +316,13 @@ This document outlines the key features and capabilities that are highly valued 
 | Voice Integration | ✅ | 100% |
 | API & Integration | ✅ | 100% |
 | Observability | 🔄 | 30% |
-| Testing | ❌ | 0% |
-| Deployment | 🔄 | 50% |
+| Testing | 🔄 | 40% |
+| Deployment | 🔄 | 70% |
 | Prompt Engineering | ✅ | 100% |
+| After-Call Work Packet | ❌ | 0% |
+| Form Assistant (RAG) | ❌ | 0% |
 
-**Overall**: 7/12 features fully implemented, 3 partial, 2 not started.
+**Overall**: 7/14 features fully implemented, 4 partial, 3 not implemented (RAG, After-Call Work Packet, Form Assistant).
 
 ---
 

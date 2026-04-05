@@ -154,6 +154,13 @@ Query Flow:
 - Sub-second semantic search
 
 #### MinIO (Object Storage)
+**reason:**
+- Allow user to store unstructured daeta (images, videos, logs, etc..)
+- S3 compatibility: Use amazon S3 REST API, allowing applications written for AWS to run seamlessly on MinIO
+- High Perfomance
+- Deplyment Flexibility: Bare metal, public cloud, kubernetes environments
+- Enterprise-Grade Security
+- Scalability & Resilience
 
 **Storage:**
 - Raw documents (PDF, Word, Excel, TXT)

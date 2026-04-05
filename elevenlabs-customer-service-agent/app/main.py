@@ -13,15 +13,19 @@ from src.agents.shared_tools.skill_tools import activate_skill, deactivate_skill
 from src.agents.shared_tools.memory_tools import retrieve_conversation_history, store_conversation_history, store_session_outcome, find_similar_sessions
 from src.services.dispatch_agent import invoke_agent
 from DAL.customerDA import CustomerDA
+from src.infrastructure.milvus import close_milvus, init_milvus
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Startup: init DB and Redis. Shutdown: close both."""
     await init_pool()
     await init_redis()
+    await init_milvus()
     create_agent()
     yield
     await close_pool()
     await close_redis()
+    await close_milvus()
 
 
 app = FastAPI(

@@ -11,7 +11,7 @@ agent_list = [agent["name"] for agent in load_agent_configs()]
 
 @tool
 @register_tool("retrieve_conversation_history")
-async def retrieve_conversation_history(agent_name: Literal[*agent_list], store: Annotated[PostgresStore, InjectedStore], state: Annotated[BaseModel, InjectedState]) -> str:
+async def retrieve_conversation_history(agent_name: Literal[*agent_list], store: Annotated[PostgresStore, InjectedStore], state: Annotated[BaseModel, InjectedState]) -> str: # type: ignore
   """
   Retrieve the conversation history for a customer
   Args:
@@ -20,17 +20,16 @@ async def retrieve_conversation_history(agent_name: Literal[*agent_list], store:
     str: The conversation history
   """
   try:
-    namespace = (agent_name, "conversation_history", state.customer_id)
-    # get the last 5 conversation history
+    namespace = (agent_name, "conversation_history")
     # As per langchain documentation, langchain automatically sort the memory by updated_at DESC 
-    conversation_history = store.get(namespace, limit = 5)
-    return conversation_history
+    conversation_history = store.get(namespace, key = state.customer_id)
+    return conversation_history.get("conversation_history")
   except Exception as e:
     return f"Error: {e}"
 
 @tool
 @register_tool("store_conversation_history")
-async def store_conversation_history(agent_name: Literal[*agent_list], conversation_history_summarized: str, store: Annotated[PostgresStore, InjectedStore], state: Annotated[BaseModel, InjectedState]) -> str:
+async def store_conversation_history(agent_name: Literal[*agent_list], conversation_history_summarized: str, store: Annotated[PostgresStore, InjectedStore], state: Annotated[BaseModel, InjectedState]) -> str: # type: ignore
   """
   Store the conversation history for a customer
   Args:
@@ -40,16 +39,51 @@ async def store_conversation_history(agent_name: Literal[*agent_list], conversat
     str: The conversation history
   """
   try:
-    namespace = (agent_name, "conversation_history", state.customer_id)
-    store.put(namespace, key = datetime.now(), value = conversation_history_summarized)
+    namespace = (agent_name, "conversation_history")
+    store.put(namespace, key = state.customer_id, value = {"conversation_history": conversation_history_summarized})
     return f"Conversation history stored for customer {state.customer_id}"
+  except Exception as e:
+    return f"Error: {e}"
+
+@tool
+@register_tool("updating_internal_cognition")
+async def updating_internal_cognition(agent_name: Literal[*agent_list], internal_cognition: str, store: Annotated[PostgresStore, InjectedStore], state: Annotated[BaseModel, InjectedState]) -> str: # pyright: ignore[reportInvalidTypeForm]
+  """
+  Updating the internal cognition of the agent
+  Args:
+    agent_name: Literal[agent_list] - The name of the agent
+    internal_cognition: str - The internal cognition of the agent
+  Returns:
+    str: The internal cognition of the agent
+  """
+  try:
+    namespace = (agent_name,)
+    store.put(namespace, key = "internal_cognition", value = {"internal_cognition": internal_cognition})
+    return f"Internal cognition updated for agent {agent_name}"
+  except Exception as e:
+    return f"Error: {e}"
+
+@tool
+@register_tool("retrieving_internal_cognition")
+async def retrieving_internal_cognition(agent_name: Literal[*agent_list], store: Annotated[PostgresStore, InjectedStore], state: Annotated[BaseModel, InjectedState]) -> str: # type: ignore
+  """
+  Retrieving the internal cognition of the agent
+  Args:
+    agent_name: Literal[agent_list] - The name of the agent
+  Returns:
+    str: The internal cognition of the agent
+  """
+  try:
+    namespace = (agent_name,)
+    internal_cognition = store.get(namespace, key = "internal_cognition")
+    return internal_cognition.get("internal_cognition")
   except Exception as e:
     return f"Error: {e}"
 
 @tool
 @register_tool("store_session_outcome")
 async def store_session_outcome(
-  agent_name: Literal[*agent_list],
+  agent_name: Literal[*agent_list], # type: ignore
   user_intent: str,
   skills_used: list[str],
   outcome: Literal["resolved", "escalated", "failed", "incomplete"],
@@ -90,7 +124,7 @@ async def store_session_outcome(
 @tool
 @register_tool("find_similar_sessions")
 async def find_similar_sessions(
-  agent_name: Literal[*agent_list],
+  agent_name: Literal[*agent_list], # type: ignore
   user_intent: str,
   outcome_filter: Literal["resolved", "escalated", "failed", "any"],
   store: Annotated[any, InjectedStore]
