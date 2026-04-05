@@ -1,13 +1,14 @@
 import uuid
 import json
-from typing import Optional, List, Callable, Literal
-from langchain_core.tools import tool
+from typing import Optional, List, Callable, Literal, Annotated
+from langchain.tools import InjectedState, tool
 from langgraph.runtime import get_runtime
 from psycopg import Date
 from pydantic import BaseModel, Field
 from datetime import date, datetime, timezone
 from src.core.customer import CustomerModel
 from src.infrastructure.database import execute, fetch
+
 
 TABLES = [
   "appointmnet_resource_bookings",
@@ -28,6 +29,7 @@ async def create_appointment_resource_booking(
   , slot_template_ids: list[int]
   , scheduled_at: datetime
   , subject: str
+  , state: Annotated[BaseModel, InjectedState]
   , notes: Optional[str] = None
   ) -> list[str]:
   """Create an appointment resource booking for a provider and a slot template
@@ -40,8 +42,7 @@ async def create_appointment_resource_booking(
   Returns:
     str: Success message
   """
-  runtime = get_runtime(CustomerModel)
-  customer = runtime.context
+  customer = state.customer
   results = []
   try:
     rows = await fetch(

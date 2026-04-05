@@ -26,19 +26,23 @@ from datetime import datetime
 from src.services.skill_registry import SkillRecord, get_skills, get_skill_tools
 from langchain.tools import InjectedState, tool
 from langgraph.types import Command
+from src.utils.sendgrid import reply_to_email
+
 load_dotenv()
 
 class AgentState(BaseModel):
   messages: Annotated[list, add_messages]
   skills: dict[str, SkillRecord]
   session_id: str
-  customer_id: str
+  customer: CustomerModel
+
 
 class AgentFactory(AgentBase):
-  def __init__(self, system_prompt: str, name: str, llm: Any, tools: List[str], db_uri: str, skill_names: List[str]):
+  def __init__(self, system_prompt: str, name: str, llm: Any, tools: List[str], db_uri: str, skill_names: List[str], communication_type: Literal["email", "voice", "chat"]):
     super().__init__()
     self.system_prompt = system_prompt
     self.name = name
+    self.communication_type = communication_type
     self.llm = llm
     self.skill_names = skill_names
     self.base_tools = get_tools(tools) + [self.remove_thread_id]
@@ -54,7 +58,7 @@ class AgentFactory(AgentBase):
     self.store = self._store_cm.__enter__()
     try:
       self.store.setup()
-      self.support_agent = self.build_graph().compile(
+      self.graph = self.build_graph().compile(
         checkpointer=self.checkpointer,
         store=self.store,
       )
@@ -72,20 +76,20 @@ class AgentFactory(AgentBase):
     thread_id = f"{self.name}:{customer.id}"
     config = {"configurable": {"thread_id": thread_id}}
 
-    existing_state = self.support_agent.get_state(config=config)
+    existing_state = self.graph.get_state(config=config)
     has_existing_state = existing_state is not None and bool(existing_state.values)
 
     if not has_existing_state:
       # New conversation - initialize with full state
-      result = await self.support_agent.ainvoke(
+      result = await self.graph.ainvoke(
         {
           "messages": [HumanMessage(content=request.request)],
           "skills": get_skills(self.skill_names),
           "session_id": session_id,
-          "customer_id": customer.id
+          "customer": customer
         },
         config=config,
-        context=customer,
+        context=request,
       )
     else:
       # Continuing existing conversation
@@ -94,25 +98,38 @@ class AgentFactory(AgentBase):
       if messages and hasattr(messages[-1], "tool_calls") and messages[-1].tool_calls:
         # Last message has pending tool calls - let the graph handle them first
         # by invoking without new messages (will route to tool_node, then back to agent)
-        result = await self.support_agent.ainvoke(
+        result = await self.graph.ainvoke(
           None,  # No new input, let graph continue from checkpoint
           config=config,
-          context=customer,
+          context=request,
         )
       else:
         # No pending tool calls - safe to add new user message
-        result = await self.support_agent.ainvoke(
+        result = await self.graph.ainvoke(
           {
               "messages": [HumanMessage(content=request.request)]
           },
           config=config,
-          context=customer,
+          context=request,
         )
     return self._last_message_text(result)
 
-  def run(self, request: AgentRunRequest, customer: CustomerModel) -> str:
-    """Sync entrypoint for scripts/tests only. Prefer arun() inside an async app."""
-    return asyncio.run(self.arun(request, customer))
+  async def email_node(self, state: AgentState, runtime: Runtime[AgentRunRequest]) -> None:
+    """Handle email communication. Force the agent to reply to the email."""
+    try:
+      await reply_to_email(
+        original_message_id=runtime.context.email_metadata["message_id"],
+        original_sender=runtime.context.email_metadata["from"],
+        original_subject=runtime.context.email_metadata["subject"],
+        reply_body=state.messages[-1].content,
+        references=runtime.context.email_metadata["references"]
+      )
+    except Exception as e:
+      print(f"Error sending email: {e}")
+    
+  # def run(self, request: AgentRunRequest, customer: CustomerModel) -> str:
+  #   """Sync entrypoint for scripts/tests only. Prefer arun() inside an async app."""
+  #   return asyncio.run(self.arun(request, customer))
 
   async def tool_node(self, state: AgentState) -> dict:
     """Execute tools and return ToolMessage responses.
@@ -137,7 +154,7 @@ class AgentFactory(AgentBase):
   # remove the thread_id from the short term memory. It is called when the call is ended. Also we will called when user request to reset the conversation.
   async def remove_thread_id(self, state: Annotated[BaseModel, InjectedState]) -> None:
     """Remove the thread_id from the short term memory. It is called when the call is ended. Also we will called when user request to reset the conversation."""
-    thread_id = f"Customer_Support_Agent:{state.customer_id}"
+    thread_id = f"{self.name}:{state.customer_id}"
     self.checkpointer.delete(thread_id)
 
   @staticmethod
@@ -153,8 +170,8 @@ class AgentFactory(AgentBase):
       return str(content)
     return str(last)
 
-  def agent(self, state: AgentState, runtime: Runtime[CustomerModel]) -> AgentState:
-    customerId = runtime.context.id
+  def agent(self, state: AgentState, runtime: Runtime[AgentRunRequest]) -> AgentState:
+    customerId = state.customer.id
     namespace = ("my_intelligence", self.name)
     intelligence = runtime.store.get(namespace, customerId)
     skills = state.skills
@@ -163,7 +180,7 @@ class AgentFactory(AgentBase):
     system_msg = SystemMessage(content=self.system_prompt.format(
       learned_instruction=intelligence,
       current_date=datetime.now().strftime("%Y-%m-%d"),
-      customer_info=runtime.context.model_dump_json(),
+      customer_info=state.customer.model_dump_json(),
       available_skills=json.dumps([{"name": skill.name, "description": skill.description} for skill in skills.values() if not skill.active]),
       active_skills=json.dumps([{"name": skill.name, "body": skill.body} for skill in skills.values() if skill.active])
     ))
@@ -182,24 +199,30 @@ class AgentFactory(AgentBase):
     }
 
   def routing(self, state: AgentState):
+    # Force the agent to communicate correctly based on the communication type.
     if state.messages[-1].tool_calls:
       return "tool"
+    elif self.communication_type == "email":
+      return "email_node"
     else:
       return END
 
   def build_graph(self) -> StateGraph:
-    graph = StateGraph(AgentState, context_schema=CustomerModel)
+    graph = StateGraph(AgentState, context_schema=AgentRunRequest)
     graph.add_node("agent", self.agent)
     graph.add_node("tool_node", self.tool_node)
+    graph.add_node("email_node", self.email_node)
     graph.add_edge(START, "agent")
     graph.add_conditional_edges(
       "agent",
       self.routing,
       {
         "tool": "tool_node",
+        "email_node": "email_node",
         END: END
       }
     )
     graph.add_edge("tool_node", "agent")
+    graph.add_edge("email_node", END)
 
     return graph

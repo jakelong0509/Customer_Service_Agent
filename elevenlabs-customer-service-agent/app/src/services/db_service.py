@@ -1,8 +1,12 @@
+# TODO: 
+# 1. Implement DB service for ingesting data into the database
+# 2. Implement DB service for querying data from the database
+
 from pathlib import Path
 
 from src.infrastructure.database import get_connection
 from src.utils.RRFLoader import RRFLoader
-
+import asyncpg
 
 class DBService:
   def __init__(
@@ -46,3 +50,17 @@ class DBService:
           records=records,
           columns=columns,
         )
+
+  async def db_query(
+    self,
+    query: str,
+    *args: object
+  ) -> list[asyncpg.Record]:
+    """
+    Query the database and return the results.
+    Args:
+      query: The query to execute.
+      *args: The arguments to pass to the query.
+    """
+    async with get_connection() as conn:
+      return await conn.fetch(query, *args)

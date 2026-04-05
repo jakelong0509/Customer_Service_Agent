@@ -8,6 +8,7 @@ class ElevenLabsAgentRunRequest(AgentRunRequest):
     """Request body for POST /api/agent/run. Dashboards (e.g. ElevenLabs webhook) send agent_name + parameters."""
     call_sid: str = Field(..., description="Caller SID")
     caller_phone_number: str = Field(..., description="Caller phone number")
+    email_metadata: dict = Field(..., description="Email metadata")
 
 class SendGridInboundRequest(BaseModel):
     """Request model for SendGrid Inbound Parse webhook.

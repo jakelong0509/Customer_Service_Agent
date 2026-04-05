@@ -22,7 +22,7 @@ async def retrieve_conversation_history(agent_name: Literal[*agent_list], store:
   try:
     namespace = (agent_name, "conversation_history")
     # As per langchain documentation, langchain automatically sort the memory by updated_at DESC 
-    conversation_history = store.get(namespace, key = state.customer_id)
+    conversation_history = store.get(namespace, key = state.customer.id)
     return conversation_history.get("conversation_history")
   except Exception as e:
     return f"Error: {e}"
@@ -40,8 +40,8 @@ async def store_conversation_history(agent_name: Literal[*agent_list], conversat
   """
   try:
     namespace = (agent_name, "conversation_history")
-    store.put(namespace, key = state.customer_id, value = {"conversation_history": conversation_history_summarized})
-    return f"Conversation history stored for customer {state.customer_id}"
+    store.put(namespace, key = state.customer.id, value = {"conversation_history": conversation_history_summarized})
+    return f"Conversation history stored for customer {state.customer.id}"
   except Exception as e:
     return f"Error: {e}"
 
@@ -106,9 +106,9 @@ async def store_session_outcome(
     str: Confirmation that the session outcome was stored
   """
   try:
-    namespace = (agent_name, "session_outcomes", state.customer_id, state.session_id)
+    namespace = (agent_name, "session_outcomes", state.customer.id, state.session_id)
     session_data = {
-      "customer_id": state.customer_id,
+      "customer_id": state.customer.id,
       "session_id": state.session_id,
       "user_intent": user_intent,
       "skills_used": skills_used,
@@ -117,7 +117,7 @@ async def store_session_outcome(
       "timestamp": store.get(("system", "current_time")) if store.get(("system", "current_time")) else "unknown"
     }
     store.set(namespace, session_data)
-    return f"Session outcome stored for customer {state.customer_id}, session {state.session_id}"
+    return f"Session outcome stored for customer {state.customer.id}, session {state.session_id}"
   except Exception as e:
     return f"Error: {e}"
 

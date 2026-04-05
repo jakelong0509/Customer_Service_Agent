@@ -102,22 +102,24 @@ async def sendgrid_inbound(
         }
         
         # Build agent run request with email metadata
-        full_request = f"""{email_str}
+        # full_request = f"""{email_str}
 
-EMAIL_METADATA: {json.dumps(email_metadata)}
+        # EMAIL_METADATA: {json.dumps(email_metadata)}
 
-Instructions: When replying to this email, activate the skill **email_skill** and call the tool **reply_to_email** and pass the following parameters: 
-- original_message_id: {message_id}
-- original_sender: {from_addr}
-- original_subject: {subject}
-- references: {references}
-"""
+        # Instructions: When replying to this email, activate the skill **email_skill** and call the tool **reply_to_email** and pass the following parameters: 
+        # - original_message_id: {message_id}
+        # - original_sender: {from_addr}
+        # - original_subject: {subject}
+        # - references: {references}
+        # """
+        
         
         agent_request = ElevenLabsAgentRunRequest(
             agent_name="customer_support_agent",
-            request=full_request,
+            request=email_str,
             call_sid=conversation_id[:255],
             caller_phone_number=from_addr,
+            email_metadata=email_metadata
         )
         
         # Process through agent
