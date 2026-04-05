@@ -24,7 +24,10 @@ class RRFLoader(BaseLoader):
     )
     for chunk in tqdm(chunk_iter, desc=f"Loading Document {self._filename}"):
       chunk.fillna('', inplace=True)
-      chunk = chunk.iloc[:, :len(self._columns)]
+      if len(self._columns) > 0:
+        chunk = chunk.loc[:, self._columns]
+      else:
+        chunk = chunk.loc[:, :]
       chunk_docs = []
       for _, row in chunk.iterrows():
         chunk_docs.append(row)

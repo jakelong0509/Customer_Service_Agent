@@ -2,18 +2,15 @@
 # 1. ingest data into Milvus vector database
 # 2. query Milvus for relevant data based on user input
 # 3. return retrieved data to agent for use in response generation
-# 4. Insert data into Relational DB (PostgreSQL)
-# 5. Query data from Relational DB (PostgreSQL)
 
 from fileinput import filename
 from typing import List, Dict
 from src.infrastructure.milvus import get_milvus
-from src.infrastructure.database import get_db_pool
 from src.utils.RRFLoader import RRFLoader
 from langchain_core.embeddings import Embeddings
 import sys
 from pathlib import Path
-from pymilvus import DataType
+from pymilvus import DataType, RRFRanker, AnnSearchRequest
 
 # Ensure project root is on path so RRF can be imported
 _project_root = Path(__file__).resolve().parent.parent
@@ -23,22 +20,7 @@ if str(_project_root) not in sys.path:
 import warnings
 warnings.filterwarnings('ignore')
 
-RXNCONSO_COLUMNS = ["RXCUI", "LAT", "TS", "LUI", "STT", "SUI", "ISPREF", "RXAUI", "SAUI", "SCUI", "SDUI", "SAB", "TTY", "CODE", "STR", "SRL", "SUPPRESS", "CVF"]
-RXNDOC_COLUMNS = ["KEY", "VALUE", "TYPE", "EXPL"]
-RXNSAT_COLUMNS = ["RXCUI", "LUI", "SUI", "RXAUI", "STYPE", "CODE", "ATUI", "SATUI", "ATN", "SAB", "ATV", "SUPPRESS", "CVF"]
-RXNSTY_COLUMNS = ["RXCUI", "TUI", "STN", "STY", "ATUI", "CVF"]
-RXNREL_COLUMNS = ["RXCUI1", "RXAUI1", "STYPE1", "REL", "RXCUI2", "RXAUI2", "STYPE2", "RELA", "RUI", "SRUI", "SAB", "SL", "RG", "DIR", "SUPPRESS", "CVF"]
-
-_RRF_COLUMNS_BY_FILENAME = {
-  "RXNCONSO": RXNCONSO_COLUMNS,
-  "RXNDOC": RXNDOC_COLUMNS,
-  "RXNSAT": RXNSAT_COLUMNS,
-  "RXNSTY": RXNSTY_COLUMNS,
-  "RXNREL": RXNREL_COLUMNS,
-}
-
 _milvus_client = get_milvus()
-_db_pool = get_db_pool()
 
 class RAGService:
   def __init__(
@@ -48,7 +30,7 @@ class RAGService:
     self._embedding_model = embedding_model
 
   async def _embed_text(self, texts: List[str]) -> List[List[float]]:
-    vector = await self._embedding_model.embed_documents(texts)
+    vector = await self._embedding_model.aembed_documents(texts)
     return vector
   
   async def ingest_local(
@@ -78,7 +60,7 @@ class RAGService:
     # get file extension and verify it's .RRF
     if Path(file_path).suffix == ".RRF":
       # We will only read the columns needed for vectorization and metadata (if pk_column is provided)
-      loader = RRFLoader(filePath=file_path, columns=[*scalar_columns, *vector_columns] if scalar_columns else vector_columns, batchSize=batch_size)
+      loader = RRFLoader(filePath=file_path, columns=scalar_columns, batchSize=batch_size)
     else:
       print(f"Unsupported file type for file {file_path}. Only .RRF files are supported.")
       return
@@ -114,11 +96,112 @@ class RAGService:
       embeddings = await self._embed_text(texts)
       for i, emb in enumerate(embeddings):
           rows_to_embed[i]["vector"] = emb
-
       # Insert into Zilliz — every row
       _milvus_client.insert(
           collection_name=collection_name,
           data=rows_to_embed,
       )
 
-      print(f"Ingested batch: {len(rows_to_embed)} entities")
+
+  async def milvus_hybrid_search(
+      self,
+      collection_name: str,
+      query: str,
+      k: int = 10,
+      filter: str = None,
+      output_fields: List[str] = None
+  ) -> List[Dict]:
+    """Perform hybrid search in Milvus
+    Args:
+        collection_name: name of Milvus collection to search in
+        query: search query string
+        k: number of results to return
+        filter: optional filter string in SQL-like syntax
+    """
+    assert collection_name != "", "Collection name must be provided"
+    assert query != "", "Query must be provided"
+    assert k > 0, "k must be greater than 0"
+
+    # Embed query
+    query_embedding = await self._embed_text([query])
+    query_embedding = query_embedding[0]
+
+    request = AnnSearchRequest(
+      data=[query_embedding],
+      anns_field="vector",
+      limit=k,
+      param = {
+        "metric_type": "COSINE",
+        "params": {
+          "level": 3
+        }
+      },
+      expr = filter
+    )
+
+    results = _milvus_client.hybrid_search(
+      collection_name=collection_name,
+      reqs = [request],
+      ranker = RRFRanker(),
+      output_fields=output_fields,
+      limit=k
+    )
+    return results
+
+  def milvus_scalar_search(
+      self,
+      collection_name: str,
+      filter: str = None,
+      output_fields: List[str] = None
+  ) -> List[Dict]:
+    """Perform scalar search in Milvus
+    Args:
+        collection_name: name of Milvus collection to search in
+        filter: optional filter string in SQL-like syntax
+        output_fields: optional list of field names to return
+    """
+    assert collection_name != "", "Collection name must be provided"
+    assert filter != "", "Filter must be provided"
+
+    # Search
+    results = _milvus_client.query(
+      collection_name=collection_name,
+      filter=filter,
+      output_fields=output_fields
+    )
+    return results
+
+  async def milvus_sematic_search(
+      self,
+      collection_name: str,
+      query: str,
+      k: int = 10,
+      filter: str = None,
+      output_fields: List[str] = None
+  ) -> List[Dict]:
+    """Perform semantic search in Milvus
+    Args:
+        collection_name: name of Milvus collection to search in
+        query: search query string
+        k: number of results to return
+        filter: optional filter string in SQL-like syntax
+        output_fields: optional list of field names to return
+    """
+    assert collection_name != "", "Collection name must be provided"
+    assert query != "", "Query must be provided"
+    assert k > 0, "k must be greater than 0"
+    assert filter != "", "Filter must be provided"
+
+    # Embed query
+    query_embedding = await self._embed_text([query])
+    query_embedding = query_embedding[0]
+
+    # Search
+    results = _milvus_client.search(
+      collection_name=collection_name,
+      data=[query_embedding],
+      limit=k,
+      filter=filter,
+      output_fields=output_fields
+    )
+    return results
