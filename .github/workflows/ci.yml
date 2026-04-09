@@ -41,8 +41,7 @@ jobs:
       - name: Docker Compose — build and run tests
         run: |
           docker compose build app
-          docker compose up -d
-          docker compose exec app python -m pytest tests/ -v -s
+          docker compose run --rm app python -m pytest tests/ -q
 
       - name: Cleanup
         if: always()

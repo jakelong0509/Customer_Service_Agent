@@ -39,6 +39,8 @@ from app.src.infrastructure.database import init_pool, close_pool
 @pytest.mark.asyncio(loop_scope="module")
 async def test_rxnorm_mapping_agent():
     """Test RxNorm mapping agent functionality."""
+    init_milvus()
+    await asyncio.wait_for(init_pool(), timeout=10.0)
     create_agent()
     agent = get_agent("rxnorm_mapping_agent_email")
     assert agent is not None
