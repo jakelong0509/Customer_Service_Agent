@@ -39,6 +39,7 @@ jobs:
 
       - name: Start services and run tests
         run: |
+          uvicorn app.main:app --reload --host 0.0.0.0 --port 80
           # Build and run tests in one command
           docker compose run --rm app pytest -q tests/
 
