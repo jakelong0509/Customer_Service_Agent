@@ -7,25 +7,25 @@ from app.src.infrastructure.milvus import init_milvus, close_milvus
 from app.src.infrastructure.database import init_pool, close_pool
 
 
-# def test_initialize_milvus():
-#     """Initialize Milvus and DB with timeout, cleanup after test."""
-#     print("Checking if services are configured")
-#     # Run sync init_milvus in thread with timeout
-#     try:
-#         init_milvus()
-#         print("Milvus initialized")
-#     except asyncio.TimeoutError:
-#         pytest.skip("Milvus connection timeout - server not reachable")
+def test_initialize_milvus():
+    """Initialize Milvus and DB with timeout, cleanup after test."""
+    print("Checking if services are configured")
+    # Run sync init_milvus in thread with timeout
+    try:
+        init_milvus()
+        print("Milvus initialized")
+    except asyncio.TimeoutError:
+        pytest.skip("Milvus connection timeout - server not reachable")
 
-# @pytest.mark.asyncio(loop_scope="module") 
-# async def test_initialize_database():
-#     """Initialize database with timeout, cleanup after test."""
-#     print("Checking if database is configured")
-#     try:
-#         await asyncio.wait_for(init_pool(), timeout=10.0)
-#         print("Database initialized")
-#     except asyncio.TimeoutError:
-#         pytest.skip("Database connection timeout")
+@pytest.mark.asyncio(loop_scope="module") 
+async def test_initialize_database():
+    """Initialize database with timeout, cleanup after test."""
+    print("Checking if database is configured")
+    try:
+        await asyncio.wait_for(init_pool(), timeout=10.0)
+        print("Database initialized")
+    except asyncio.TimeoutError:
+        pytest.skip("Database connection timeout")
 
 def test_create_agent():
     """Test that agents are created properly."""
