@@ -1,4 +1,4 @@
-# Build the app image and run pytest inside it (same environment as production).
+# Build with Docker Compose (Postgres + Redis + app) and run pytest in the app container.
 name: CI
 
 on:
@@ -37,20 +37,13 @@ jobs:
           echo "LANGSMITH_TRACING=${{ secrets.LANGSMITH_TRACING }}" >> .env
           echo "LANGSMITH_ENDPOINT=${{ secrets.LANGSMITH_ENDPOINT }}" >> .env
 
-      # Matches Dockerfile: EXPOSE 8000 + CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
-      - name: Build Docker image
-        run: docker build -t customer-service-agent:ci .
-
-      # Override CMD: Dockerfile defaults to uvicorn :8000; tests run pytest instead.
-      - name: Run tests in container
+      # Starts db + redis (healthchecks), builds app from Dockerfile, runs pytest (overrides CMD).
+      - name: Docker Compose — build and run tests
         run: |
-          docker run --rm --env-file .env customer-service-agent:ci \
-            python -m pytest tests/ -q
+          docker compose build app
+          docker compose up -d
+          docker compose exec app python -m pytest tests/ -v -s
 
-      # Optional: same as Dockerfile CMD — uvicorn app.main:app --host 0.0.0.0 --port 8000
-      # EXPOSE 8000 → publish with -p 8000:8000. Enable when the app can start without extra services.
-      # - name: Smoke test default CMD
-      #   run: |
-      #     docker run -d --name ci-app --env-file .env -p 8000:8000 customer-service-agent:ci
-      #     curl -sf --retry 15 --retry-delay 2 http://127.0.0.1:8000/
-      #     docker rm -f ci-app
+      - name: Cleanup
+        if: always()
+        run: docker compose down -v
