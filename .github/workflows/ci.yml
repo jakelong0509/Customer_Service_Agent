@@ -37,12 +37,20 @@ jobs:
           echo "LANGSMITH_TRACING=${{ secrets.LANGSMITH_TRACING }}" >> .env
           echo "LANGSMITH_ENDPOINT=${{ secrets.LANGSMITH_ENDPOINT }}" >> .env
 
-      - name: Start services and run tests
-        run: |
-          uvicorn app.main:app --reload --host 0.0.0.0 --port 80
-          # Build and run tests in one command
-          docker compose run --rm app pytest -q tests/
+      # Matches Dockerfile: EXPOSE 8000 + CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+      - name: Build Docker image
+        run: docker build -t customer-service-agent:ci .
 
-      - name: Cleanup
-        if: always()
-        run: docker compose down
+      # Override CMD: Dockerfile defaults to uvicorn :8000; tests run pytest instead.
+      - name: Run tests in container
+        run: |
+          docker run --rm --env-file .env customer-service-agent:ci \
+            python -m pytest tests/ -q
+
+      # Optional: same as Dockerfile CMD — uvicorn app.main:app --host 0.0.0.0 --port 8000
+      # EXPOSE 8000 → publish with -p 8000:8000. Enable when the app can start without extra services.
+      # - name: Smoke test default CMD
+      #   run: |
+      #     docker run -d --name ci-app --env-file .env -p 8000:8000 customer-service-agent:ci
+      #     curl -sf --retry 15 --retry-delay 2 http://127.0.0.1:8000/
+      #     docker rm -f ci-app
