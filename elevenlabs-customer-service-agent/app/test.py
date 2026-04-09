@@ -1,4 +1,4 @@
-from src.agents.customer_support_agent.agent import get_agent_voice
+from src.services.agent_registry import get_agent
 from src.core.agent_run_request_model import AgentRunRequest
 from src.core.conversation import CallContext
 from src.core.customer import CustomerModel
@@ -30,7 +30,7 @@ if __name__ == "__main__":
     status="",
   )
   print("--- run 1: no customer information (empty CustomerModel) ---")
-  print(get_agent_voice().run(_req_base, _customer_empty))
+  print(get_agent("customer_support_agent").run(_req_base, _customer_empty))
 
   _req_with_customer = AgentRunRequest(
     agent_name="customer_support_agent",
@@ -48,4 +48,4 @@ if __name__ == "__main__":
     status="active",
   )
   print("--- run 2: with customer information ---")
-  print(get_agent_voice().run(_req_with_customer, _customer_filled))
+  print(get_agent("customer_support_agent").run(_req_with_customer, _customer_filled))

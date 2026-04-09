@@ -204,4 +204,7 @@ class RAGService:
       filter=filter,
       output_fields=output_fields
     )
-    return results
+     # Flatten: results[0] is the list of hits for our single query
+    if results and len(results) > 0:
+        return results[0]  # ← Return just the hits, not wrapped in outer list
+    return []

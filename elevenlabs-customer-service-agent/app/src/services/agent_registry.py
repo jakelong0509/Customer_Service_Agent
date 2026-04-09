@@ -101,6 +101,7 @@ def create_agent() -> AgentFactory:
       tools=agent_config["tools"],
       db_uri=db_uri,
       skill_names=agent_config["skill_names"],
+      communication_type=agent_config["communication_type"],
     )
     AGENTS[agent_config["name"]] = agent_cls
 

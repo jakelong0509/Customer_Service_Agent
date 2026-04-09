@@ -115,7 +115,7 @@ async def sendgrid_inbound(
         
         
         agent_request = ElevenLabsAgentRunRequest(
-            agent_name="customer_support_agent",
+            agent_name="customer_support_agent_email",
             request=email_str,
             call_sid=conversation_id[:255],
             caller_phone_number=from_addr,

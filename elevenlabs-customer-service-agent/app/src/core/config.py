@@ -22,6 +22,10 @@ class Settings(BaseSettings):
     redis_username: str | None = os.getenv("REDIS_USERNAME")
     redis_password: str | None = os.getenv("REDIS_PASSWORD")
 
+    # Milvus
+    milvus_cluster_endpoint: str | None = os.getenv("MILVUS_CLUSTER_ENDPOINT")
+    milvus_collection_token: str | None = os.getenv("MILVUS_COLLECTION_TOKEN")
+
     # App
     log_level: str = os.getenv("LOG_LEVEL", "INFO")
     environment: str = os.getenv("ENVIRONMENT", "development")
@@ -33,9 +37,11 @@ def get_settings() -> Settings:
     settings = Settings()
     settings.database_url = os.getenv("POSTGRES_CONNECTION_STRING")
     settings.redis_host = os.getenv("REDIS_HOST")
-    settings.redis_port = int(os.getenv("REDIS_PORT"))
+    settings.redis_port = int(os.getenv("REDIS_PORT") or 6379)
     settings.redis_username = os.getenv("REDIS_USERNAME")
     settings.redis_password = os.getenv("REDIS_PASSWORD")
+    settings.milvus_cluster_endpoint = os.getenv("MILVUS_CLUSTER_ENDPOINT")
+    settings.milvus_collection_token = os.getenv("MILVUS_COLLECTION_TOKEN")
     settings.log_level = os.getenv("LOG_LEVEL")
     settings.environment = os.getenv("ENVIRONMENT")
     return settings

@@ -21,6 +21,11 @@
       "path": "elevenlabs-customer-service-agent/app/DAL",
       "envManager": "ms-python.python:conda",
       "packageManager": "ms-python.python:conda"
+    },
+    {
+      "path": "elevenlabs-customer-service-agent/app/src/skills",
+      "envManager": "ms-python.python:conda",
+      "packageManager": "ms-python.python:conda"
     }
   ]
 }

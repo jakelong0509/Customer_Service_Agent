@@ -33,6 +33,7 @@ class SkillRecord(BaseModel):
     """One skill discovered on disk."""
     name: Annotated[str, Field(description="The name of the skill")]
     description: Annotated[str, Field(description="The description of the skill")]
+    when_to_use: Annotated[str, Field(description="The when to use the skill")]
     isolation_fork: Annotated[bool, Field(description="Whether the skill is isolated")]
     body: Annotated[str, Field(description="The body of the skill")]
     active: bool = False
@@ -50,6 +51,7 @@ def _parse_skill_md(path: Path, skill_folder_name: str) -> SkillRecord:
   skill_record = SkillRecord(
     name=meta.get("name"),
     description=meta.get("description"),
+    when_to_use=meta.get("when_to_use"),
     isolation_fork=meta.get("isolation") == "fork" or meta.get("isolation") is True,
     body=body,
   )

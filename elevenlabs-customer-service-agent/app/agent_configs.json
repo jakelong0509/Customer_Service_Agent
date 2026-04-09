@@ -5,7 +5,17 @@
     "llm": "kimi-k2.5",
     "tools": ["activate_skill", "deactivate_skill", "retrieve_conversation_history", "store_conversation_history", "store_session_outcome", "find_similar_sessions"],
     "db_uri": "POSTGRES_CONNECTION_STRING",
-    "skill_names": ["appointment_booking_skill", "email_skill"]
+    "skill_names": ["appointment_booking_skill", "email_skill"],
+    "communication_type": "voice"
+  },
+  {
+    "name": "customer_support_agent_email",
+    "system_prompt_path": "src/agents/customer_support_agent/system_prompt.md",
+    "llm": "kimi-k2.5",
+    "tools": ["activate_skill", "deactivate_skill", "retrieve_conversation_history", "store_conversation_history", "store_session_outcome", "find_similar_sessions"],
+    "db_uri": "POSTGRES_CONNECTION_STRING",
+    "skill_names": ["appointment_booking_skill"],
+    "communication_type": "email"
   },
   {
     "name": "security_agent",
@@ -13,6 +23,16 @@
     "llm": "kimi-k2.5",
     "tools": ["activate_skill", "deactivate_skill", "retrieve_conversation_history", "store_conversation_history", "store_session_outcome", "find_similar_sessions"],
     "db_uri": "POSTGRES_CONNECTION_STRING",
-    "skill_names": []
+    "skill_names": [],
+    "communication_type": "chat"
+  },
+  {
+    "name": "rxnorm_mapping_agent_email",
+    "system_prompt_path": "src/agents/rxnorm_mapping_agent/system_prompt.md",
+    "llm": "kimi-k2.5",
+    "tools": ["activate_skill", "deactivate_skill", "retrieve_conversation_history", "store_conversation_history", "store_session_outcome", "find_similar_sessions"],
+    "db_uri": "POSTGRES_CONNECTION_STRING",
+    "skill_names": ["text_normalize_skill", "clinical_entity_extraction_skill", "rxnorm_mapping_skill"],
+    "communication_type": "email"
   }
 ]

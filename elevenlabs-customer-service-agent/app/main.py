@@ -8,9 +8,8 @@ from controllers.elevenlabs_controller import router as elevenlabs_router
 from controllers.sendgrid import router as sendgrid_router
 from src.infrastructure.database import close_pool, init_pool
 from src.infrastructure.redis import close_redis, init_redis
+from src.agents.shared_tools import auto_register_tools
 from src.services.agent_registry import create_agent
-from src.agents.shared_tools.skill_tools import activate_skill, deactivate_skill
-from src.agents.shared_tools.memory_tools import retrieve_conversation_history, store_conversation_history, store_session_outcome, find_similar_sessions
 from src.services.dispatch_agent import invoke_agent
 from DAL.customerDA import CustomerDA
 from src.infrastructure.milvus import close_milvus, init_milvus
@@ -18,14 +17,14 @@ from src.infrastructure.milvus import close_milvus, init_milvus
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Startup: init DB and Redis. Shutdown: close both."""
+    init_milvus()
     await init_pool()
     await init_redis()
-    await init_milvus()
     create_agent()
     yield
     await close_pool()
     await close_redis()
-    await close_milvus()
+    close_milvus()
 
 
 app = FastAPI(
