@@ -25,7 +25,7 @@ from pydantic import BaseModel, Field
 from typing import Annotated
 import os
 # ``src/.skills/`` -> parent is ``src/`` -> skills live in ``src/skills/``
-current_dir = Path(__file__).parent.parent.parent / "skills"
+current_dir = Path(__file__).parent.parent.parent / "src/skills"
 _SKILLS_ROOT = str(current_dir)
 print(f"Skills root: {_SKILLS_ROOT}")
 

@@ -16,6 +16,21 @@ _embedding_model = HuggingFaceEmbeddings(model_name="neuml/pubmedbert-base-embed
 _rag_service = RAGService(embedding_model=_embedding_model)
 _db_service = DBService()
 
+def _dict_to_milvus_filter(metadata_filter: Dict[str, Any] | None) -> str | None:
+    """Convert a dict of field=value pairs to a Milvus filter expression string.
+
+    Milvus search() requires filter as a SQL-like string, not a dict.
+    Example: {"TTY": "IN", "SUPPRESS": "N"} → "TTY == 'IN' and SUPPRESS == 'N'"
+    """
+    if not metadata_filter:
+        return None
+    clauses = [
+        f"{key.lower()} == '{value}'" if isinstance(value, str) else f"{key.lower()} == {value}"
+        for key, value in metadata_filter.items()
+    ]
+    return " and ".join(clauses)
+
+
 @tool
 async def query_rxnconso(
     query: str = None,
@@ -39,8 +54,8 @@ async def query_rxnconso(
         collection_name="RXNCONSO",
         query=query,
         k=k,
-        filter=metadata_filter,
-        output_fields=["RXCUI", "TTY", "STR"]
+        filter=_dict_to_milvus_filter(metadata_filter),
+        output_fields=["rxcui", "tty", "str"]
     )
     return rxnconso_results
     

@@ -5,8 +5,10 @@ at import time without manual bookkeeping.
 """
 from __future__ import annotations
 
+import importlib
 from typing import Any, Dict, Iterator, Optional, Type, List
 from src.core.agent_base import AgentBase
+from src.core.agent_state import AgentState
 from src.agents.agent_factory import AgentFactory
 import json
 from src.core.agent_config import AgentConfig, load_agent_configs
@@ -15,6 +17,24 @@ from langchain_openai import ChatOpenAI
 import os
 from dotenv import load_dotenv
 load_dotenv()
+
+
+def _load_state_class(dotted_path: str | None) -> Type[AgentState]:
+    """Dynamically import a state class from its dotted module path.
+
+    Returns base AgentState when dotted_path is None or empty,
+    so agents without custom state work transparently.
+
+    Example:
+        "src.agents.rxnorm_mapping_agent.state.RxNormAgentState"
+        → imports src.agents.rxnorm_mapping_agent.state
+        → returns RxNormAgentState
+    """
+    if not dotted_path:
+        return AgentState
+    module_path, class_name = dotted_path.rsplit(".", 1)
+    module = importlib.import_module(module_path)
+    return getattr(module, class_name)
 
 # Agent implementation type: any class used as an agent (subclassing optional).
 AgentType = Type[AgentBase]
@@ -89,7 +109,11 @@ def register_agent(name: Optional[str] = None, *, registry: Optional[AgentRegist
 def create_agent() -> AgentFactory:
   agent_configs = load_agent_configs()
   for agent_config in agent_configs:
-    system_prompt = Path(Path(__file__).parent.parent.parent / agent_config["system_prompt_path"]).read_text()
+    state_class = _load_state_class(agent_config.get("state_class"))
+    print(f"Creating agent {agent_config['name']} with state={state_class.__name__} tools={agent_config['tools']}")
+    system_prompt = Path(Path(__file__).parent.parent.parent / agent_config["system_prompt_path"]).read_text(
+        encoding="utf-8"
+    )
     llm = ChatOpenAI(model=agent_config["llm"], base_url="https://api.moonshot.ai/v1", temperature=0.6, max_tokens=25000, timeout=None, max_retries=2, extra_body={
         "thinking": {"type": "disabled"}
     })
@@ -102,6 +126,7 @@ def create_agent() -> AgentFactory:
       db_uri=db_uri,
       skill_names=agent_config["skill_names"],
       communication_type=agent_config["communication_type"],
+      state_class=state_class,
     )
     AGENTS[agent_config["name"]] = agent_cls
 

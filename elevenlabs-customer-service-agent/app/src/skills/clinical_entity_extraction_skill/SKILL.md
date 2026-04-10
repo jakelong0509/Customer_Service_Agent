@@ -65,28 +65,6 @@ Extract with:
 - `create_condition_entity` - Create a condition entity
 - `store_entities` - Save all extracted entities to global state
 
-## Output Format
-```json
-{
-  "extracted_entities": [
-    {
-      "entity_text": "Metformin 500mg PO BID",
-      "entity_type": "MEDICATION",
-      "entity_metadata": {
-        "is_negated": false,
-        "certainty": "confirmed",
-        "temporality": "current"
-      },
-      "entity_med_info": {
-        "dose": "500",
-        "unit": "mg",
-        "route": "PO",
-        "frequency": "BID"
-      }
-    }
-  ]
-}
-```
 
 ## Example
 

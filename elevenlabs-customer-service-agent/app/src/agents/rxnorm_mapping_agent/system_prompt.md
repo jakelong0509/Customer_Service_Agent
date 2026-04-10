@@ -15,9 +15,9 @@ Call `activate_skill` with `skill_name="text_normalize_skill"`
 Call `normalize_text` with the clinical note.
 
 **Normalization rules:**
-- Expand abbreviations: "BID" → "twice daily", "PO" → "oral"
-- Standardize drug names: "metformin" → "Metformin"
-- Expand forms: "tab" → "tablet", "cap" → "capsule"
+- Expand abbreviations: "BID" -> "twice daily", "PO" -> "oral"
+- Standardize drug names: "metformin" -> "Metformin"
+- Expand forms: "tab" -> "tablet", "cap" -> "capsule"
 - Keep numbers and dosages unchanged
 
 ### Step 4: Deactivate Normalization, Activate Entity Extraction
@@ -56,7 +56,7 @@ Call `query_rxnconso` to search for the drug:
 
 **If direct search fails:**
 Call `query_rxnrel` with RELA="inverse_isa" to navigate hierarchy from general to specific:
-- IN → SCDC → SCD
+- IN -> SCDC -> SCD
 
 **If brand name provided:**
 First call `query_rxnconso` with TTY="SBD" to find the branded concept.
@@ -83,7 +83,7 @@ Format the extracted entities with their RXCUI and NDC codes.
 - **Full RxNorm Name:** [Complete drug name from database]
 - **NDC Code:** [National Drug Code for billing]
 - **Generic Equivalent:** [If brand was provided]
-- **Confidence:** [similarity_score × 100, formatted as percentage, e.g., 0.92 → 92%]
+- **Confidence:** [similarity_score × 100, formatted as percentage, e.g., 0.92 -> 92%]
 - **Status:** Mapped / Needs Review / Failed
 
 ### Billing Summary
@@ -119,7 +119,7 @@ Format the extracted entities with their RXCUI and NDC codes.
 - If no: Report: "No medication entities found"
 
 **If query_rxnconso returns no results:**
-- Try broader TTY (SCD → SCDF → SCDC → IN)
+- Try broader TTY (SCD -> SCDF -> SCDC -> IN)
 - Try removing form details from search
 - If still no results: Report "Entity not found in RxNorm"
 
@@ -178,17 +178,17 @@ Pt started on metformin 500mg PO BID
 ```
 1. activate_skill("text_normalize_skill")
 2. normalize_text("Pt started on metformin 500mg PO BID")
-   → "Patient started on Metformin 500mg oral twice daily"
+   -> "Patient started on Metformin 500mg oral twice daily"
 3. deactivate_skill("text_normalize_skill")
 4. activate_skill("clinical_entity_extraction_skill")
 5. extract_entities("Patient started on Metformin 500mg oral twice daily")
-   → [{entity_text: "Metformin 500mg", entity_type: "MEDICATION", entity_med_info: {dose: "500", unit: "mg", route: "oral", frequency: "twice daily"}}]
+   -> [{{entity_text: "Metformin 500mg", entity_type: "MEDICATION", entity_med_info: {{dose: "500", unit: "mg", route: "oral", frequency: "twice daily"}}}}]
 6. deactivate_skill("clinical_entity_extraction_skill")
 7. activate_skill("rxnorm_mapping_skill")
 8. query_rxnconso("Metformin 500mg", tty="SCD")
-   → [{RXCUI: "861007", STR: "Metformin 500 MG Oral Tablet", TTY: "SCD", similarity_score: 0.92}]
+   -> [{{RXCUI: "861007", STR: "Metformin 500 MG Oral Tablet", TTY: "SCD", similarity_score: 0.92}}]
 9. query_rxnsat(RXCUI="861007", ATN="NDC")
-   → [{ATN: "NDC", ATV: "0093-1074-01"}]
+   -> [{{ATN: "NDC", ATV: "0093-1074-01"}}]
 10. deactivate_skill("rxnorm_mapping_skill")
 11. Return formatted results
 ```

@@ -10,6 +10,9 @@ from langchain_core.messages import ToolMessage
 from langchain_core.tools import InjectedToolCallId
 from langgraph.types import Command, Send
 from typing import List, Callable
+from src.agents.rxnorm_mapping_agent.state import NormalizedText
+from pydantic import BaseModel
+from langchain.tools import InjectedState
 
 # Namespace for long-term memory (LangGraph store API). Groups all abbreviation entries.
 ABBREVIATIONS_NAMESPACE = ("rxnorm_mapping_agent", "abbreviations")
@@ -143,6 +146,23 @@ def reflection(original_note: str, normalized_note: str):
 #     goto = f"handoff_to_{agent_name}_agent"
 #   )
 
-TOOLS = [store_abbreviations, retrieve_abbreviations]
+@tool
+async def normalize_text(normalized_text: NormalizedText, state: Annotated[BaseModel, InjectedState], tool_call_id: Annotated[str, InjectedToolCallId]) -> NormalizedText:
+  """
+  Normalize the text.
+  Parameters:
+  normalized_text: the normalized text
+  """
+  normalized_text = NormalizedText(normalized_text=normalized_text.normalized_text)
+  update = {
+    "messages": [ToolMessage(content=f"Normalized text: {normalized_text.normalized_text}", tool_call_id=tool_call_id)],
+    "normalized_text": normalized_text
+  }
+  return Command(
+    update=update
+  )
+
+
+TOOLS = [store_abbreviations, retrieve_abbreviations, normalize_text]
 def get_tools() -> List[Callable]:
     return TOOLS

@@ -5,10 +5,11 @@ import os
 import sys
 import json
 
-from typing import Any, Callable, List, Annotated, Literal
+from typing import Any, Callable, List, Annotated, Literal, Type
 
 from langgraph.runtime import Runtime
 from src.core.agent_base import AgentBase
+from src.core.agent_state import AgentState
 from langchain_core.messages import SystemMessage, HumanMessage, ToolMessage
 from langgraph.graph import StateGraph, START, END
 from langgraph.graph.message import add_messages
@@ -30,21 +31,26 @@ from src.utils.sendgrid import reply_to_email
 
 load_dotenv()
 
-class AgentState(BaseModel):
-  messages: Annotated[list, add_messages]
-  skills: dict[str, SkillRecord]
-  session_id: str
-  customer: CustomerModel
-
 
 class AgentFactory(AgentBase):
-  def __init__(self, system_prompt: str, name: str, llm: Any, tools: List[str], db_uri: str, skill_names: List[str], communication_type: Literal["email", "voice", "chat"]):
+  def __init__(
+    self,
+    system_prompt: str,
+    name: str,
+    llm: Any,
+    tools: List[str],
+    db_uri: str,
+    skill_names: List[str],
+    communication_type: Literal["email", "voice", "chat"],
+    state_class: Type[AgentState] = AgentState,
+  ):
     super().__init__()
     self.system_prompt = system_prompt
     self.name = name
     self.communication_type = communication_type
     self.llm = llm
     self.skill_names = skill_names
+    self.state_class = state_class
     self.base_tools = get_tools(tools) + [self.remove_thread_id]
     self.toolNode = ToolNode(self.base_tools + get_skill_tools(self.skill_names))
     self.db_uri = db_uri
@@ -208,7 +214,7 @@ class AgentFactory(AgentBase):
       return END
 
   def build_graph(self) -> StateGraph:
-    graph = StateGraph(AgentState, context_schema=AgentRunRequest)
+    graph = StateGraph(self.state_class, context_schema=AgentRunRequest)
     graph.add_node("agent", self.agent)
     graph.add_node("tool_node", self.tool_node)
     graph.add_node("email_node", self.email_node)

@@ -35,17 +35,6 @@ when_to_use: Use this skill when processing raw clinical notes that contain
 - `retrieve_abbreviation` - Retrieve abbreviation meanings from memory
 - `reflect_on_normalization` - Complete normalization and store result
 
-## Output Format
-```json
-{
-  "normalized_note": "Fully expanded clinical note with section headers...",
-  "sections": {
-    "HPI": "History of Present Illness...",
-    "Assessment": "Assessment...",
-    "Plan": "Plan..."
-  }
-}
-```
 
 ## Example
 

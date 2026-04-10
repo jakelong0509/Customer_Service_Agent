@@ -2,6 +2,7 @@
   {
     "name": "customer_support_agent",
     "system_prompt_path": "src/agents/customer_support_agent/system_prompt.md",
+    "state_class": null,
     "llm": "kimi-k2.5",
     "tools": ["activate_skill", "deactivate_skill", "retrieve_conversation_history", "store_conversation_history", "store_session_outcome", "find_similar_sessions"],
     "db_uri": "POSTGRES_CONNECTION_STRING",
@@ -11,6 +12,7 @@
   {
     "name": "customer_support_agent_email",
     "system_prompt_path": "src/agents/customer_support_agent/system_prompt.md",
+    "state_class": null,
     "llm": "kimi-k2.5",
     "tools": ["activate_skill", "deactivate_skill", "retrieve_conversation_history", "store_conversation_history", "store_session_outcome", "find_similar_sessions"],
     "db_uri": "POSTGRES_CONNECTION_STRING",
@@ -20,6 +22,7 @@
   {
     "name": "security_agent",
     "system_prompt_path": "src/agents/security_agent/system_prompt.md",
+    "state_class": "src.agents.security_agent.state.SecurityAgentState",
     "llm": "kimi-k2.5",
     "tools": ["activate_skill", "deactivate_skill", "retrieve_conversation_history", "store_conversation_history", "store_session_outcome", "find_similar_sessions"],
     "db_uri": "POSTGRES_CONNECTION_STRING",
@@ -29,6 +32,7 @@
   {
     "name": "rxnorm_mapping_agent_email",
     "system_prompt_path": "src/agents/rxnorm_mapping_agent/system_prompt.md",
+    "state_class": "src.agents.rxnorm_mapping_agent.state.RxNormAgentState",
     "llm": "kimi-k2.5",
     "tools": ["activate_skill", "deactivate_skill", "retrieve_conversation_history", "store_conversation_history", "store_session_outcome", "find_similar_sessions"],
     "db_uri": "POSTGRES_CONNECTION_STRING",

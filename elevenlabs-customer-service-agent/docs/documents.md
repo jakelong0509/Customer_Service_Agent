@@ -1,56 +1,79 @@
-# Customer Service Agent — Tool API
+# Documentation map
 
-## Architecture (no WebSocket)
-
-- **This server** exposes an **HTTP API for tools only**. No telephony or voice AI code runs here.
-- **Twilio** and **ElevenLabs** are configured on their own dashboards (webhooks, flows, etc.). When they need to run a tool (e.g. lookup customer, create ticket), they call our API.
-- **Postgres** and **Redis** are kept for tools and optional session/cache use.
-
-```
-┌─────────────┐                    ┌─────────────────────────────────┐
-│  Twilio /   │  HTTP POST         │  Our server                      │
-│ ElevenLabs  │  /api/tools/run    │  - FastAPI                       │
-│ (dashboard  │ ─────────────────► │  - Tools (customer, support,     │
-│  config)    │  { tool_name,      │    handoff)                      │
-│             │    parameters }    │  - Postgres + Redis              │
-└─────────────┘                    └─────────────────────────────────┘
-```
+This page lists **where documentation lives** in the ElevenLabs Customer Service Agent repo and what each item is for. For system behavior and APIs, follow the links below.
 
 ---
 
-## Folder overview
+## Root
+
+| File | Purpose |
+|------|---------|
+| [README.md](../README.md) | Project overview, folder layout, setup (`pip`, `uvicorn`, Docker), links to primary docs. |
+
+---
+
+## `docs/` — project documentation
+
+| File | Purpose |
+|------|---------|
+| [getting_started.md](getting_started.md) | Step-by-step local setup: Python, Postgres, Redis, env, running the app. |
+| [architecture.md](architecture.md) | End-to-end architecture: FastAPI, ElevenLabs/Twilio integration, Postgres, Redis, RAG (Milvus, MinIO), tool/agent flow. |
+| [api.md](api.md) | HTTP API: health, ElevenLabs routes, RAG, tools; request/response shapes. Interactive OpenAPI at `/docs` when the server runs. |
+| [database.md](database.md) | PostgreSQL schema: customers, scheduling, lookup tables, RAG/RxNorm relational tables; mirrors `app/init_db/create_tables.sql`. |
+| [RAG.md](RAG.md) | RAG design for clinical/hospital use: Milvus collections, ingestion, medical terminology. |
+| [RAG_RXNORM.md](RAG_RXNORM.md) | How RxNorm normalization maps to DB/Milvus and coder-style workflows. |
+| [skill_loading_workflow.md](skill_loading_workflow.md) | How skills are discovered, loaded, and injected into agent context. |
+| [features.md](features.md) | Feature checklist (agentic AI / job-facing); maps capabilities to files in `app/`. |
+| [deploy.md](deploy.md) | AWS-oriented deployment (e.g. ECS, RDS, ElastiCache) walkthrough. |
+| [Docker.md](Docker.md) | Docker Compose and container usage for local or deployed runs. |
+| [system_design.md](system_design.md) | General system-design interview notes (not app-specific). |
+| [hyperagents.md](hyperagents.md) | Notes on the Hyperagents / DGM paper (reference reading). |
+| **documents.md** (this file) | Index of documentation and in-repo authored material. |
+
+---
+
+## Application code — authored docs (not in `docs/`)
+
+These files travel with the code they describe; loaders often use them at runtime.
+
+| Location | Purpose |
+|----------|---------|
+| `app/agent_configs.json` | Agent definitions, models, skills, and routing metadata for the factory/registry. |
+| `app/src/agents/*/system_prompt.md` | System prompts for **customer_support_agent**, **security_agent**, **rxnorm_mapping_agent** (placeholders documented in each file). |
+| `app/src/skills/*/SKILL.md` | Skill contracts: **appointment_booking**, **clinical_entity_extraction**, **email**, **rxnorm_mapping**, **text_normalize** — when to use, workflows, tool names. |
+
+---
+
+## Data and infrastructure scripts
+
+| Path | Purpose |
+|------|---------|
+| `app/init_db/create_tables.sql` | Authoritative Postgres DDL; described in [database.md](database.md). |
+| `app/init_db/seed.sql`, `app/init_db/seed.py` | Optional seed data for local/demo use. |
+| `app/init_milvus.py` | Milvus collection setup (e.g. RxNorm-related collections; see `docs/RAG.md`). |
+
+---
+
+## Repository layout (high level)
 
 | Area | Role |
 |------|------|
-| **`app/main.py`** | FastAPI app, lifespan (init/close DB + Redis), mounts API router. |
-| **`app/config.py`** | Settings: database URL, Redis host/port, log level, environment. No Twilio/ElevenLabs. |
-| **`app/api/routes.py`** | **GET /api/health** and **POST /api/tools/run** (body: `tool_name`, `parameters`; optional context in body or headers). |
-| **`app/services/tool_dispatcher.py`** | Dispatches by `tool_name` to the tool registry; returns a string result. |
-| **`app/tools/`** | Registry and tool implementations (customer, support, handoff). |
-| **`app/models/conversation.py`** | `CallContext` (optional call_sid, from_number, to_number) for tool calls. |
-| **`app/infrastructure/`** | Postgres (asyncpg) and Redis clients. |
-
----
-
-## Tool API
-
-- **POST /api/tools/run**  
-  - Body: `{ "tool_name": string, "parameters": object }`  
-  - Optional context: `call_sid`, `from_number`, `to_number` in body or headers (`X-Call-Sid`, `X-From`, `X-To`).  
-  - Response: `{ "result": string, "is_error": boolean }`.
-
-Twilio or ElevenLabs (or any caller) send a request when they need to execute a tool; the server runs it and returns the result.
-
----
-
-## Environment
-
-See `.env.example`. Required: Postgres connection string, Redis host/port. Optional: Redis auth, `LOG_LEVEL`, `ENVIRONMENT`.
+| `app/main.py` | FastAPI app: lifespan (DB, Redis, Milvus, agent init), routers. |
+| `app/controllers/` | HTTP routes: general API (`routes.py`), ElevenLabs (`elevenlabs_controller.py`), SendGrid (`sendgrid.py`). |
+| `app/src/agents/` | Agent factory, LangGraph agents, shared tools. |
+| `app/src/skills/` | Skill packages and tool scripts per skill. |
+| `app/src/services/` | Dispatch, RAG, registries, DB helpers. |
+| `app/src/infrastructure/` | `database`, `redis`, `milvus`, `agent` wiring. |
+| `app/DAL/` | Data access (e.g. customer). |
+| `tests/` | Tests and fixtures. |
+| `scripts/` | Deploy and migration helpers. |
 
 ---
 
 ## Summary
 
-- Server = **tool API only** (no WebSocket, no Twilio/ElevenLabs logic).
-- Twilio and ElevenLabs are handled on their dashboards; they call our API to run tools.
-- DB and Redis remain for tools and state/cache.
+- **Start here for setup:** [getting_started.md](getting_started.md) and [README.md](../README.md).  
+- **Behavior and integrations:** [architecture.md](architecture.md) and [api.md](api.md).  
+- **Schema:** [database.md](database.md) and `app/init_db/create_tables.sql`.  
+- **Agents and skills:** `app/agent_configs.json`, `app/src/agents/*/system_prompt.md`, `app/src/skills/*/SKILL.md`, plus [skill_loading_workflow.md](skill_loading_workflow.md).  
+- **RAG / clinical search:** [RAG.md](RAG.md), [RAG_RXNORM.md](RAG_RXNORM.md).
