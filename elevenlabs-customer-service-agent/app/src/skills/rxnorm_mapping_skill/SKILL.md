@@ -1,228 +1,206 @@
 ---
 name: rxnorm_mapping_skill
-description: Maps medication entities to RxNorm codes (SCD/SBD) with NDC codes by querying the RxNorm database tables.
-when_to_use: Use this skill after entity extraction to resolve medication entities to RXCUI, NDC codes, and hierarchical path documentation.
+description: Maps MEDICATION entities from normalized clinical text to RxNorm drug concepts (RXCUI, TTY, canonical name) using RXNCONSO, RXNREL, and related tables.
+when_to_use: Use after clinical_entity_extraction_skill (and text_normalize_skill) to resolve each medication mention to a stable drug concept for charting, CDS, and interoperability.
 ---
 
 ## Purpose
-Map medication entities to RxNorm codes (RXCUI) and NDC codes for medical billing.
+
+**Primary objective:** Map **clinical medication entities** extracted from **normalized** note text to **RxNorm drug concepts** — i.e. resolve *what drug concept this text refers to* using **RXCUI**, **TTY**, and the **canonical RxNorm string (STR)**.
+
+This is **clinical mapping**: text → standard vocabulary identity. It answers whether the mention is an ingredient, a strength component, a fully specified clinical drug (SCD), a branded drug (SBD), etc., and picks the best-matching concept with a traceable resolution path.
 
 ## When to Use
-- Input: A MEDICATION entity from clinical text
-- After: clinical_entity_extraction_skill has identified the drug
-- Output: Resolved RXCUI with NDC codes and resolution path
+
+- **Input:** One or more **MEDICATION** entities (from `clinical_entity_extraction_skill`), with text already **normalized** (`text_normalize_skill`) where applicable.
+- **After:** Entity extraction has produced `entity_text`, optional `entity_med_info` (dose, unit, form, brand, route, frequency).
+- **Output:** Resolved **drug concept** — **RXCUI**, **TTY**, **full RxNorm name (STR)** — plus **resolution_path** and **confidence_score**.
 
 ## Input Format
+
 ```
-entity_text: "Metformin 500mg"  # Raw medication text
+entity_text: "Metformin 500mg"   # Medication span from extraction
 entity_type: "MEDICATION"       # Must be MEDICATION
-entity_med_info: {               # Optional extracted details
+entity_med_info: {               # Optional; improves TTY choice and matching
   dose: "500",
   unit: "mg",
-  route: "PO",
+  route: "oral",
   form: "tablet",
   brand_name: null,
   frequency: "BID"
 }
 ```
 
-## RxNorm Database Tables
+## Multiple medication entities (process many at once)
 
-### RXNCONSO (Concept Names)
-Columns: RXCUI, STR (searchable), TTY, SAB, SUPPRESS
-Key TTY values (from generic to specific):
-- IN = Ingredient (e.g., "Metformin")
-- SCDC = Component with strength (e.g., "Metformin 500mg")
-- SCDF = With dose form (e.g., "Metformin 500mg Oral Tablet")
-- SCD = Fully specified clinical drug (TARGET for coding)
-- SBD = Branded version (e.g., "Glucophage 500mg")
+When **clinical_entity_extraction_skill** returns **several** MEDICATION entities for one note, treat mapping as **one resolution pass per entity**, but **do not** require strict one-at-a-time tool use:
 
-### RXNREL (Relationships)
-Navigate between concepts using:
-- RELA="isa" : IN → SCDC → SCD (hierarchy up)
-- RELA="tradename_of" : SBD → SCD (brand to generic)
+- **Batch / parallel tool use:** For **independent** mentions (e.g. metformin, lisinopril, atorvastatin), you may call **`retrieve_resolved_relationship`** and **`query_rxnconso`** (and follow-on **`query_rxnrel`**) **multiple times in the same turn**—once per **`entity_text`** (or per distinct span)—so several drugs are mapped **in parallel** from the caller’s perspective. Each call still uses that entity’s **`entity_text`** / **`entity_med_info`** for TTY choice and validation.
+- **Same algorithm per entity:** Apply **Steps 1–8** below **independently** for each entity. Output should include **one resolved concept block per input entity** (or per distinct line item you keep).
+- **Deduplicate:** If two extracted rows share the **same** normalized medication span (duplicate line or repeated mention), **resolve once** and **reuse** the same **`final_concept`** for both—avoid redundant Milvus/DB work and duplicate **`store_resolved_relationship`** rows unless you need distinct anchors for auditing.
+- **Combination vs multi-ingredient list:** If the note describes a **fixed combo** as one product (e.g. a single combination tablet), extraction may yield **one** entity with **`is_combination: true`** and multiple components—follow **combination** handling in your resolution path. If extraction yields **separate** ingredient entities that together form one ordered product, avoid mapping each ingredient as a standalone **SCD** when the workflow expects the **combo** concept; align with how **`clinical_entity_extraction_skill`** structured **`components`**.
+- **Ordering:** For ordinary polypharmacy, **order does not matter**. If one mapping depends on disambiguation from another (rare), finish the clearer entity first, then use context—otherwise treat entities as **unordered**.
 
-### RXNSAT (Attributes)
-Get NDC codes: query where ATN="NDC", get ATV as the code
+## RxNorm Tables (What Each Is For)
+
+### RXNCONSO (concept names) — **primary for mapping**
+- Semantic / lexical match from mention → candidate **RXCUI** + **STR** + **TTY**.
+- Use **TTY** to match the specificity of the entity (ingredient vs strength vs full clinical drug vs brand).
+
+### RXNREL (relationships) — **navigation when direct match is weak**
+- **isa:** move along ingredient → SCDC → SCD (or broader ↔ narrower concepts).
+- **tradename_of:** SBD → generic SCD when you need the generic equivalent.
+
+### RXNSTY (semantic types)
+- Confirm the concept behaves like a **drug / substance** as expected for your workflow.
+
+### RXNDOC (documentation)
+- Decode **TTY**, **RELA**, and other codes for explanations in logs or UI.
+
+## Target TTY (Match Entity Specificity)
+
+| Entity signal | Prefer TTY |
+|----------------|------------|
+| Ingredient only | IN |
+| Ingredient + strength | SCDC |
+| Ingredient + strength + form (incomplete spec) | SCDF |
+| Fully specified generic clinical drug | **SCD** (preferred clinical drug target) |
+| Brand name / branded product | SBD |
+
+## Available Tools
+
+  ### query_rxnconso
+  Semantic search over RXNCONSO (concept names).
+  Parameters: `query`, `metadata_filter` (e.g. TTY, SUPPRESS), `k`  
+  Returns: matches with **rxcui**, **tty**, **str**, similarity.
+
+  ### query_rxnrel
+  Query RXNREL relationships (e.g. **isa**, **tradename_of**).  
+  Parameters: `metadata_filter` (RXCUI1, RELA, etc.)  
+  Returns: related **RXCUI2**, **TTY**, **RELA**.
+
+  ### query_rxndoc
+  Look up meanings of **TTY**, **RELA**, and other documentation keys.
+
+  ### retrieve_resolved_relationship
+  Semantic search over the **`rxnorm_resolved_relationship`** Milvus collection (vector = **`anchor_text`**).  
+  Parameters: **`anchor_text`** (required) — embedded and matched against stored resolutions; **`k=10`** and filter **`confidence_score >= 0.85`** are fixed in the tool.  
+  Returns: list of matching records (fields include **`anchor_text`**, **`final_concept`**, **`confidence_score`**, etc.). Use **before** STEP 3 when you want to reuse a prior **`final_concept`**; confirm the hit is clinically correct.
+
+  ### store_resolved_relationship
+  Writes one resolved mapping into **`rxnorm_resolved_relationship`** (same embedding model as RXNCONSO).  
+  Parameters: **`anchor_text`**, **`anchor_tty`**, **`is_combination`**, **`resolution_path`**, **`components`**, **`final_concept`**, **`confidence_score`**.  
+  Call after a confident resolution so **`retrieve_resolved_relationship`** can find similar **`anchor_text`** later.
 
 ## Resolution Algorithm (FOLLOW THIS ORDER)
 
 ### STEP 1: Analyze Input Completeness
 ```
-IF entity contains (name + strength + form):
-    → Try DIRECT SEARCH on SCD
-ELIF entity contains (name + strength):
-    → Try DIRECT SEARCH on SCDC
-ELIF entity contains brand_name:
-    → Try DIRECT SEARCH on SBD
-ELSE (ingredient name only):
-    → Try DIRECT SEARCH on IN
+IF name + strength + form (clear clinical drug):
+    → Direct search toward SCD (or SCDF if needed)
+ELIF name + strength only:
+    → SCDC (then refine toward SCD via RXNREL if needed)
+ELIF brand_name present:
+    → SBD first; then tradename_of → SCD if generic concept required
+ELSE:
+    → IN, then hierarchical navigation
 ```
 
-### STEP 2: Execute Direct Search
-Use query_rxnconso with appropriate TTY filter:
+### STEP 2: Reuse prior resolution (optional, Milvus semantic cache)
+
+Before heavy `query_rxnconso` / `query_rxnrel` work, check whether a **similar** medication was already resolved and saved to the **`rxnorm_resolved_relationship`** collection (embeddings on **`anchor_text`**):
+
+```
+retrieve_resolved_relationship(anchor_text=<current entity_text or normalized span>)
+```
+
+- **Parameters:** **`anchor_text`** — the same string you would use as the mapping target for this entity (verbatim or normalized; it is embedded and searched semantically).
+- **Behavior:** Returns up to **10** prior rows, **Milvus-filtered** to **`confidence_score >= 0.85`**. Each hit includes **`anchor_text`**, **`anchor_tty`**, **`final_concept`**, **`confidence_score`**, and the other fields written by **`store_resolved_relationship`**.
+- **Reuse rule:** If a returned row’s **`anchor_text`** / **`final_concept`** aligns with the current entity (semantic neighbors are possible—**verify** STR / RXCUI against the note), **reuse** that **`final_concept`** and **skip** redundant RxNorm navigation for that entity.
+- If **no** suitable hit, confidence is borderline, or the candidate is the **wrong drug**, continue to STEP 3.
+
+- After you successfully resolve an entity, call **`store_resolved_relationship`** so future turns (any customer) can retrieve similar **`anchor_text`** matches. This cache is **cross-session**, not keyed by customer id in the tool API.
+
+### STEP 3: Direct Search (RXNCONSO)
 ```
 query_rxnconso(
   query=entity_text,
-  tty=<determined from Step 1>,
-  limit=5
+  metadata_filter={"TTY": "<from Step 1>", "SUPPRESS": "N"},
+  k=5
 )
 ```
+Pick the best candidate by **similarity_score** and **whether STR matches** dose/form/brand when present.
 
-### STEP 3: Evaluate Results
+### STEP 4: Evaluate Results
 ```
 IF top result confidence >= 0.95:
-    → SUCCESS: Get NDC codes via query_rxnsat
-    → Set resolution_strategy="direct"
-    → Set confidence_score=0.95-1.0
-    → RETURN result
+    → SUCCESS: clinical concept resolved (RXCUI + TTY + STR)
+    → resolution_strategy="direct"
+    → call tool `store_resolved_relationship`
+    → RETURN
 
 ELIF top result confidence >= 0.85:
-    → Check: Does STR contain expected strength/form?
-    → IF yes: SUCCESS with note
-    → IF no: Try BROADER TTY (e.g., SCDF instead of SCD)
+    → Validate STR vs expected strength/form
+    → IF yes: SUCCESS (concept resolved)
+    → IF no: try broader/narrower TTY or fallback
 
 ELSE (confidence < 0.85 or no results):
-    → FALLBACK to HIERARCHICAL navigation
+    → FALLBACK: hierarchical navigation (RXNREL)
 ```
 
-### STEP 4: Hierarchical Navigation (Fallback)
+### STEP 5: Hierarchical Navigation (Fallback)
 
 #### Path A: Ingredient → Clinical Drug
 ```
-1. Find IN: query_rxnconso(entity.ingredient_name, TTY="IN")
-   → Get in_cui
+1. IN: query_rxnconso(ingredient, TTY="IN") → in_cui
 
-2. Navigate up: query_rxnrel(
-     RXCUI1=in_cui,
-     RELA="isa",
-     target_tty="SCDC"
-   )
-   → Get list of SCDC candidates (different strengths)
+2. query_rxnrel(RXCUI1=in_cui, RELA="isa", target_tty="SCDC")
+   → Match strength from entity_med_info to STR
 
-3. Match strength:
-   - Parse STR field of each SCDC for "{dose} {unit}"
-   - Select best match
-   → Get scdc_cui
+3. query_rxnrel(RXCUI1=scdc_cui, RELA="isa", target_tty="SCD")
+   → Match form in STR if specified
 
-4. Continue up: query_rxnrel(
-     RXCUI1=scdc_cui,
-     RELA="isa",
-     target_tty="SCD"
-   )
-   → Get SCD candidates
+4. Final output: chosen SCD (or best SCDC) RXCUI + path
 
-5. Match form (if specified):
-   - Filter SCD by entity.form in STR
-   → Select final_scd
-
-6. Get NDC: query_rxnsat(RXCUI=final_scd, ATN="NDC")
-   → Get billing codes
-
-7. Set resolution_strategy="hierarchical"
-   Set confidence_score based on match quality:
-   - Exact strength+form match: 0.85-0.94
-   - Partial match: 0.70-0.84
-   - Multiple candidates: 0.50-0.69
+5. resolution_strategy="hierarchical"
+   confidence: 0.85–0.94 exact match; 0.70–0.84 partial; 0.50–0.69 multiple candidates
 ```
 
-#### Path B: Brand Name → Generic
+#### Path B: Brand → Generic Concept
 ```
-1. Find SBD: query_rxnconso(entity.brand_name, TTY="SBD")
-   → Get sbd_cui
+1. SBD: query_rxnconso(brand + strength if any, TTY="SBD") → sbd_cui
 
-2. Cross-reference: query_rxnrel(
-     RXCUI1=sbd_cui,
-     RELA="tradename_of"
-   )
-   → Get scd_cui (generic equivalent)
+2. query_rxnrel(RXCUI1=sbd_cui, RELA="tradename_of") → scd_cui (generic SCD)
 
-3. Get NDC: query_rxnsat(RXCUI=scd_cui, ATN="NDC")
+3. Primary success = RXCUI + STR for the chosen concept(s)
 
-4. Set resolution_strategy="brand_cross_reference"
-   Set confidence_score=0.90-0.95
+4. resolution_strategy="brand_cross_reference"
 ```
 
-### STEP 5: Handle Multiple Options
+### STEP 6: Multiple Candidates
 ```
-IF hierarchical navigation returns >1 valid options:
-  → Create list: "Available options:"
-      [1] Metformin 500mg (RXCUI: 316151)
-      [2] Metformin 850mg (RXCUI: 316153)
-      [3] Metformin 1000mg (RXCUI: 316155)
-  → Set confidence_score=0.50-0.69 (needs selection)
-  → RETURN options for user selection
+IF >1 plausible RXCUI:
+  → List options with RXCUI + STR
+  → confidence 0.50–0.69 until user/system selects
 ```
 
-### STEP 6: Error Recovery
+### STEP 7: Error Recovery
 
-#### No Direct Match Found
+#### No Direct Match
 ```
-1. Normalize: Remove abbreviations ("tab"→"tablet", "PO"→"oral")
-2. Retry direct search with normalized text
-3. Try broader TTY:
-   - If SCD failed → try SCDF
-   - If SCDF failed → try SCDC
-   - If SCDC failed → try IN
-4. IF all direct fail → use hierarchical from IN
-```
-
-#### No NDC Codes Found
-```
-1. Check parent concept (SCDC of the SCD)
-2. Check branded version (related SBD)
-3. IF still no NDC:
-   → Add warning: "No NDC available - manual lookup required"
-   → Still return RXCUI (useful for clinical reference)
+1. Expand abbreviations in query (tab→tablet, PO→oral)
+2. Retry RXNCONSO; broaden TTY (SCD → SCDF → SCDC → IN)
+3. If still failing: hierarchical from IN
 ```
 
 #### Strength Mismatch
 ```
-IF input "500mg" but closest is "250mg" or "850mg":
-  1. Calculate: within 20% of target?
-  2. IF yes: Present as "closest available"
-  3. IF no: Present multiple options
-  4. Add note: "Exact strength not available, showing alternatives"
+→ If close strengths: present alternatives or closest SCDC/SCD
+→ Document uncertainty; lower confidence
 ```
 
-## Available Tools
 
-### query_rxnconso
-Semantic search in RXNCONSO table.
-Parameters:
-- query: string (search text)
-- tty: string (filter by TTY: IN/SCDC/SCDF/SCD/SBD)
-- limit: integer (default 10)
-Returns: List of {RXCUI, STR, TTY, similarity_score}
-
-### query_rxnrel
-Query relationships from RXNREL table.
-Parameters:
-- RXCUI1: string (source concept ID)
-- RELA: string (relationship: "isa", "tradename_of")
-- target_tty: string (optional filter for RXCUI2 TTY)
-Returns: List of {RXCUI2, TTY, RELA}
-
-### query_rxnsat
-Query attributes from RXNSAT table.
-Parameters:
-- RXCUI: string (concept ID)
-- ATN: string (attribute name, e.g., "NDC")
-Returns: List of {ATN, ATV} where ATV is the value
-
-### query_rxndoc
-Query documentation/abbreviations.
-Parameters:
-- KEY: string (attribute type: "TTY", "RELA", "ATN")
-- VALUE: string (the code to look up)
-Returns: {EXPL} human-readable explanation
-
-### store_resolved_relationship
-Save the final result.
-Parameters: resolved_relationship object (see Output Format)
-Returns: confirmation string
-
-## Output Format
+## Output Format (Concept-Centric)
 
 ```json
 {
@@ -239,18 +217,15 @@ Returns: confirmation string
       "scdc_cui": "316151",
       "hops": [
         {"source_tty": "IN", "target_tty": "SCDC", "rela": "isa", "target_cui": "316151"},
-        {"source_tty": "SCDC", "target_tty": "SCD", "rela": "isa", "target_cui": "6809"}
+        {"source_tty": "SCDC", "target_tty": "SCD", "rela": "isa", "target_cui": "861007"}
       ]
     }
   ],
   "final_concept": {
-    "rxcui": "6809",
+    "rxcui": "861007",
     "tty": "SCD",
     "full_name": "Metformin 500 MG Oral Tablet",
-    "route_confirmed": "Oral Tablet",
-    "validation_metadata": [
-      {"attribute_name": "NDC", "attribute_value": "0093-1074-01"}
-    ]
+    "route_confirmed": "Oral Tablet"
   },
   "confidence_score": 0.92
 }
@@ -260,67 +235,44 @@ Returns: confirmation string
 
 | Score | Meaning | Action |
 |-------|---------|--------|
-| 0.95-1.0 | Direct match, exact specs, NDC found | Auto-approve |
-| 0.85-0.94 | Direct or hierarchical with full path | Approve with documentation |
-| 0.70-0.84 | Hierarchical with good matching | Suggest review |
-| 0.50-0.69 | Multiple options, best guess | Require user selection |
-| <0.50 | Poor match | Escalate to human |
+| 0.95–1.0 | Strong concept match; STR aligns with entity | Trust for clinical use |
+| 0.85–0.94 | Solid match; path documented | Use; note any caveats |
+| 0.70–0.84 | Good but partial or hierarchical | Review if high-stakes |
+| 0.50–0.69 | Multiple concepts or ambiguity | User/system selection |
+| <0.50 | Weak or no match | Do not rely on; escalate |
 
 ## Few-Shot Examples
 
-### Example 1: Complete Spec → Direct Path
-Input: `entity_text="Metformin 500mg Oral Tablet"`, has dose/unit/form
+### Example 1: Full spec → Direct concept
+Input: `entity_text="Metformin 500mg Oral Tablet"` (normalized)
 
-Execution:
-1. Analyze: Has name+strength+form → Try SCD
-2. query_rxnconso("Metformin 500mg Oral Tablet", TTY="SCD") → RXCUI 6809 (score: 0.97)
-3. Score 0.97 >= 0.95 → SUCCESS
-4. query_rxnsat(RXCUI="6809", ATN="NDC") → ["0093-1074-01"]
-5. RETURN with confidence=0.98, strategy="direct"
+1. Target SCD → `query_rxnconso` → **RXCUI 861007**, high score  
+2. **SUCCESS:** clinical concept = metformin 500 mg oral tablet  
 
-### Example 2: Ingredient Only → Hierarchical Path
-Input: `entity_text="Metformin"`, no details provided
+### Example 2: Ingredient only → Options
+Input: `entity_text="Metformin"` only
 
-Execution:
-1. Analyze: Ingredient only → Try IN
-2. query_rxnconso("Metformin", TTY="IN") → RXCUI 6809 (score: 1.0)
-3. Score is high but need to find specific product → Hierarchical
-4. query_rxnrel(RXCUI1="6809", RELA="isa", target_tty="SCDC") → [315979, 316151, 316152, 316153]
-5. Parse STR: "Metformin 250mg", "Metformin 500mg", "Metformin 850mg", "Metformin 1000mg"
-6. No specific dose requested → Return options with confidence=0.65
-7. User selects "500mg" → Continue navigation
-8. query_rxnrel(RXCUI1="316151", RELA="isa", target_tty="SCD") → RXCUI 6809
-9. query_rxnsat(RXCUI="6809", ATN="NDC") → codes
-10. RETURN with confidence=0.92, strategy="hierarchical"
+1. **IN** match → **RXCUI 6809**  
+2. **isa** → multiple SCDC strengths → return **options** (low confidence until selection)  
+3. After user picks strength → **isa** → SCD → final **RXCUI**
 
-### Example 3: Brand Name → Cross-Reference
-Input: `entity_text="Lipitor 20mg"`, brand_name="Lipitor"
+### Example 3: Brand → Generic concept
+Input: `entity_text="Lipitor 20mg"`, `brand_name="Lipitor"`
 
-Execution:
-1. Analyze: Has brand → Try SBD
-2. query_rxnconso("Lipitor 20mg", TTY="SBD") → RXCUI 617318 (score: 0.96)
-3. Score high but need generic for standard coding
-4. query_rxnrel(RXCUI1="617318", RELA="tradename_of") → RXCUI 833671
-5. query_rxnsat(RXCUI="833671", ATN="NDC") → ["0003-0740-13"]
-6. RETURN with confidence=0.95, strategy="brand_cross_reference"
+1. **SBD** → **RXCUI** for branded atorvastatin 20 mg  
+2. **tradename_of** → **SCD** generic **RXCUI**  
+3. Primary deliverable: **RXCUI** + **STR** for the chosen level (SBD vs SCD per policy)
 
-### Example 4: No Match → Error Recovery
-Input: `entity_text="Metformin 500mg tab"` (abbreviation "tab")
+### Example 4: Abbreviation recovery
+Input: `"Metformin 500mg tab"`
 
-Execution:
-1. Analyze: Has name+strength+form → Try SCD
-2. query_rxnconso("Metformin 500mg tab", TTY="SCD") → No results (score: 0)
-3. No match → RECOVERY
-4. Normalize: "tab" → "tablet"
-5. query_rxnconso("Metformin 500mg tablet", TTY="SCD") → RXCUI 6809 (score: 0.96)
-6. SUCCESS with normalized query
+1. Normalize **tab** → **tablet** → retry **SCD** search → concept resolved
 
 ## Best Practices
-1. Always try direct search first - it's fastest and highest confidence
-2. Use hierarchical when input is vague or you need to show options
-3. Cross-reference brands to generics for standard coding
-4. Normalize abbreviations before searching (tab→tablet, PO→oral, etc.)
-5. Always retrieve NDC codes from final SCD or SBD
-6. If no exact strength match, show available options within 20% tolerance
-7. Document the resolution path for audit trails
-8. When confidence < 0.70, always present options to user
+
+1. **Optimize for RXCUI + STR** — that is the clinical mapping outcome.  
+2. Use **direct RXNCONSO** search when the entity is specific; use **RXNREL** when it is vague.  
+3. Use **brand** vs **generic** policy explicitly (SBD vs SCD as final concept).  
+4. Document **resolution_path** for audit.  
+5. If **confidence < 0.70**, surface **options** or human review.  
+6. Normalize abbreviations before searching when extraction leaves them in.

@@ -59,7 +59,8 @@ async def main() -> None:
             await run_seed(conn)
         print(
             "Seed completed from seed.sql: customers, providers, callback_requests, "
-            "appointments, appointment_resource_bookings (slot_templates from create_tables.sql)."
+            "appointments, appointment_resource_bookings, inventory (if RXNSAT data is loaded; "
+            "slot_templates from create_tables.sql)."
         )
     finally:
         await pool.close()

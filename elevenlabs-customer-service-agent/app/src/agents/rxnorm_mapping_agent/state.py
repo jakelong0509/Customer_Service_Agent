@@ -27,6 +27,7 @@ class MappingResults(BaseModel):
     mapping_results: list[MappingResult]
     ndc_results: list[NDCResult]
 
+
 class RxNormAgentState(AgentState):
     """State for the RxNorm mapping agent.
 

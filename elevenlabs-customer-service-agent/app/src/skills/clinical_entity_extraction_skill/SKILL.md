@@ -64,21 +64,15 @@ Extract with:
 - `create_medication_entity` - Create a medication entity with all metadata
 - `create_condition_entity` - Create a condition entity
 - `store_entities` - Save all extracted entities to global state
+- `extract_entities` - Tool to update agent state with extract entities ALWAYS CALL THIS TOOL
 
-
-## Example
-
-**Input:**
-```
-Patient is a 55-year-old male with history of hypertension and type 2 diabetes. 
-Current medications: Metformin 1000mg BID, Lisinopril 10mg daily. 
-Denies any history of heart disease. Possible sleep apnea per wife's report.
-```
-
-**Output Entities:**
-1. Hypertension (CONDITION, confirmed, current)
-2. Type 2 Diabetes (CONDITION, confirmed, current)
-3. Metformin 1000mg BID (MEDICATION, dose=1000, unit=mg, frequency=BID)
-4. Lisinopril 10mg daily (MEDICATION, dose=10, unit=mg, frequency=qd)
-5. Heart disease (CONDITION, negated - NOT extracted as positive)
-6. Sleep apnea (NOT extracted - only "possible" per wife's report)
+**Extract these fields for each medication:**
+- entity_text: Full text mention (e.g., "Lipitor 20mg")
+- entity_type: Must be "MEDICATION"
+- entity_med_info:
+  - brand_name: If mentioned (e.g., "Lipitor")
+  - dose: Numeric value (e.g., "20")
+  - unit: Unit of measure (e.g., "mg")
+  - route: Administration route (e.g., "oral", "IV")
+  - form: Drug form (e.g., "tablet", "capsule")
+  - frequency: Dosing schedule (e.g., "daily", "twice daily")

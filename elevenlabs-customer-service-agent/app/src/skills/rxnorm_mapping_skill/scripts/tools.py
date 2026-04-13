@@ -4,17 +4,21 @@ Tools for RxNorm Mapping Skill
 Maps medication entities to RxNorm codes (SCD/SBD) with NDC codes.
 """
 from langchain.tools import tool
+from langchain.tools import InjectedStore
 from typing import Annotated, List, Dict, Any, Callable
 from langchain_core.tools import InjectedToolCallId
-from langgraph.types import Command
-from langchain_core.messages import ToolMessage
+from langchain.tools import InjectedState, InjectedStore
 from src.services.RAG_service import RAGService
 from src.services.db_service import DBService
+from src.services.agent_registry import get_agent_names
 from langchain_huggingface import HuggingFaceEmbeddings
+from pydantic import BaseModel
+from src.infrastructure.milvus import get_milvus
 
 _embedding_model = HuggingFaceEmbeddings(model_name="neuml/pubmedbert-base-embeddings")
 _rag_service = RAGService(embedding_model=_embedding_model)
 _db_service = DBService()
+_agent_list = get_agent_names()
 
 def _dict_to_milvus_filter(metadata_filter: Dict[str, Any] | None) -> str | None:
     """Convert a dict of field=value pairs to a Milvus filter expression string.
@@ -135,9 +139,8 @@ async def query_rxndoc(
     return rxndoc_results
 
 
-
 @tool
-def store_resolved_relationship(
+async def store_resolved_relationship(
     anchor_text: str,
     anchor_tty: str,
     is_combination: bool,
@@ -145,7 +148,7 @@ def store_resolved_relationship(
     components: List[Dict[str, Any]],
     final_concept: Dict[str, Any],
     confidence_score: float,
-    tool_call_id: Annotated[str, InjectedToolCallId],
+    state: Annotated[BaseModel, InjectedState],
 ):
     """
     Store completed ResolvedRelationship in global state.
@@ -158,34 +161,63 @@ def store_resolved_relationship(
     components: List of ingredient components with hops
     final_concept: Dict with rxcui, tty, full_name, validation_metadata
     confidence_score: Float 0.0-1.0
-    tool_call_id: Injected tool call ID
     """
+    components_string_list = []
+    for component in components:
+        component_string = f"ingredient_name: {component['ingredient_name']}, in_cui: {component['in_cui']}, strength: {component['strength']}, scdc_cui: {component['scdc_cui']}"
+        components_string_list.append(component_string)
+    final_concept_string = f"rxcui: {final_concept['rxcui']}, tty: {final_concept['tty']}, full_name: {final_concept['full_name']}"
     resolved_relationship = {
         "anchor_text": anchor_text,
         "anchor_tty": anchor_tty,
         "is_combination": is_combination,
         "resolution_path": resolution_path,
-        "components": components,
-        "final_concept": final_concept,
+        "components": components_string_list,
+        "final_concept": final_concept_string,
         "confidence_score": confidence_score
     }
     
-    return Command(
-        update={
-            "global_medical_state": {
-                "resolved_relationship": [resolved_relationship]
-            },
-            "messages": [
-                ToolMessage(
-                    name="store_resolved_relationship",
-                    content=f"Stored resolution for: {anchor_text} -> RXCUI: {final_concept.get('rxcui', 'unknown')}",
-                    tool_call_id=tool_call_id
-                )
-            ]
-        },
-        goto="end"  # End of workflow
-    )
 
-TOOLS = [query_rxnconso, query_rxnrel, query_rxnsat, query_rxnsty, query_rxndoc, store_resolved_relationship]
+    try:
+        await _rag_service.runtime_milvus_ingest(
+            collection_name="rxnorm_resolved_relationship",
+            data=[resolved_relationship],
+            vector_columns=["anchor_text"],
+            scalar_columns=["anchor_text", "anchor_tty", "is_combination", "resolution_path", "components", "final_concept", "confidence_score"]
+        )
+        return f"Resolved relationship stored for customer {state.customer.id}"
+    except Exception as e:
+        return f"Error: {e}"
+
+@tool
+async def retrieve_resolved_relationship(
+    anchor_text: str,
+) -> List[Dict[str, Any]]:
+    """
+    Retrieve completed ResolvedRelationship from global state.
+    
+    Parameters:
+    anchor_text: The anchor text to search for
+    """
+    try:
+        resolved_relationship = await _rag_service.milvus_sematic_search(
+            collection_name="rxnorm_resolved_relationship",
+            query=anchor_text,
+            k=10,
+            filter="confidence_score >= 0.85",
+            output_fields=["anchor_text", "anchor_tty", "is_combination", "resolution_path", "components", "final_concept", "confidence_score"]
+        )
+        return resolved_relationship
+    except Exception as e:
+        return f"Error: {e}"
+
+TOOLS = [
+    query_rxnconso,
+    query_rxnrel,
+    query_rxnsty,
+    query_rxndoc,
+    retrieve_resolved_relationship,
+    store_resolved_relationship,
+]
 def get_tools() -> List[Callable]:
     return TOOLS

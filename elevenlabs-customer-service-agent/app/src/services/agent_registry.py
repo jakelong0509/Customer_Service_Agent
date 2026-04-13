@@ -18,7 +18,6 @@ import os
 from dotenv import load_dotenv
 load_dotenv()
 
-
 def _load_state_class(dotted_path: str | None) -> Type[AgentState]:
     """Dynamically import a state class from its dotted module path.
 
@@ -74,13 +73,10 @@ class AgentRegistry:
         """Remove all registrations (intended for tests)."""
         self._agents.clear()
 
-
 _default_registry = AgentRegistry()
-
 
 def get_agent_registry() -> AgentRegistry:
     return _default_registry
-
 
 def register_agent(name: Optional[str] = None, *, registry: Optional[AgentRegistry] = None):
     """
@@ -96,7 +92,6 @@ def register_agent(name: Optional[str] = None, *, registry: Optional[AgentRegist
         class SupportAgent:
             ...
     """
-
     def decorator(agent_cls: AgentType) -> AgentType:
         key = name if name is not None else agent_cls.__name__
         reg = registry if registry is not None else _default_registry
@@ -104,7 +99,6 @@ def register_agent(name: Optional[str] = None, *, registry: Optional[AgentRegist
         return agent_cls
 
     return decorator
-
 
 def create_agent() -> AgentFactory:
   agent_configs = load_agent_configs()
@@ -134,4 +128,10 @@ def get_agent(name: str) -> AgentFactory:
   return AGENTS[name]
 
 def get_agent_names() -> List[str]:
-  return list(AGENTS.keys())
+  """Runtime-registered agents, or names from ``agent_configs.json`` before ``create_agent()``."""
+  if AGENTS:
+    return list(AGENTS.keys())
+  try:
+    return [c["name"] for c in load_agent_configs()]
+  except Exception:
+    return []

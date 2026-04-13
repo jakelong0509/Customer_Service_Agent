@@ -15,7 +15,7 @@ from langgraph.graph import StateGraph, START, END
 from langgraph.graph.message import add_messages
 from pydantic import BaseModel
 from langgraph.prebuilt import ToolNode
-from langgraph.checkpoint.memory import InMemorySaver
+from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
 from src.services.tool_registry import get_tools
 
 from src.core.customer import CustomerModel
@@ -55,19 +55,17 @@ class AgentFactory(AgentBase):
     self.toolNode = ToolNode(self.base_tools + get_skill_tools(self.skill_names))
     self.db_uri = db_uri
     # reload the skills by skill names, the skill objects include the tools and the skill body.
-    self.checkpointer = InMemorySaver()
     # from_conn_string is @contextmanager — the call returns a context manager, not PostgresStore.
     # __enter__() yields the real store; keep the CM alive so the DB connection stays open.
     if not self.db_uri:
       raise ValueError("db_uri (e.g. POSTGRES_CONNECTION_STRING) is required for PostgresStore")
     self._store_cm = PostgresStore.from_conn_string(conn_string=self.db_uri)
     self.store = self._store_cm.__enter__()
+    self._async_checkpointer_cm = None
+    self.checkpointer = None
+    self.graph = None
     try:
       self.store.setup()
-      self.graph = self.build_graph().compile(
-        checkpointer=self.checkpointer,
-        store=self.store,
-      )
     except BaseException:
       self._store_cm.__exit__(*sys.exc_info())
       raise
@@ -77,12 +75,34 @@ class AgentFactory(AgentBase):
       self._store_cm.__exit__(None, None, None)
       self._store_cm = None
 
+  async def aclose(self) -> None:
+    """Release async checkpointer and sync store (call when shutting down the app)."""
+    if self._async_checkpointer_cm is not None:
+      await self._async_checkpointer_cm.__aexit__(None, None, None)
+      self._async_checkpointer_cm = None
+      self.checkpointer = None
+      self.graph = None
+    self.close()
+
+  async def _ensure_compiled(self) -> None:
+    """`ainvoke` requires AsyncPostgresSaver (`aget_tuple`); compile graph on first async run."""
+    if self.graph is not None:
+      return
+    self._async_checkpointer_cm = AsyncPostgresSaver.from_conn_string(conn_string=self.db_uri)
+    self.checkpointer = await self._async_checkpointer_cm.__aenter__()
+    await self.checkpointer.setup()
+    self.graph = self.build_graph().compile(
+      checkpointer=self.checkpointer,
+      store=self.store,
+    )
+
   async def arun(self, request: AgentRunRequest, customer: CustomerModel, session_id: str) -> str:
     """Run the graph with async tool support (await ainvoke). Use from FastAPI/async code."""
-    thread_id = f"{self.name}:{customer.id}"
+    await self._ensure_compiled()
+    thread_id = f"{self.name}:{customer.id}:{session_id}"
     config = {"configurable": {"thread_id": thread_id}}
 
-    existing_state = self.graph.get_state(config=config)
+    existing_state = await self.graph.aget_state(config=config)
     has_existing_state = existing_state is not None and bool(existing_state.values)
 
     if not has_existing_state:
@@ -123,12 +143,13 @@ class AgentFactory(AgentBase):
   async def email_node(self, state: AgentState, runtime: Runtime[AgentRunRequest]) -> None:
     """Handle email communication. Force the agent to reply to the email."""
     try:
+      print(f"Sending email to {runtime.context.from_email} with subject {runtime.context.subject}")
       await reply_to_email(
-        original_message_id=runtime.context.email_metadata["message_id"],
-        original_sender=runtime.context.email_metadata["from"],
-        original_subject=runtime.context.email_metadata["subject"],
+        original_message_id=runtime.context.message_id,
+        original_sender=runtime.context.from_email,
+        original_subject=runtime.context.subject,
         reply_body=state.messages[-1].content,
-        references=runtime.context.email_metadata["references"]
+        references=runtime.context.references
       )
     except Exception as e:
       print(f"Error sending email: {e}")
@@ -145,7 +166,6 @@ class AgentFactory(AgentBase):
     """
     try:
       response = await self.toolNode.ainvoke(state)
-      print(response)
       # ToolNode returns a list of ToolMessage objects
       return response
     except Exception as e:
@@ -160,8 +180,10 @@ class AgentFactory(AgentBase):
   # remove the thread_id from the short term memory. It is called when the call is ended. Also we will called when user request to reset the conversation.
   async def remove_thread_id(self, state: Annotated[BaseModel, InjectedState]) -> None:
     """Remove the thread_id from the short term memory. It is called when the call is ended. Also we will called when user request to reset the conversation."""
-    thread_id = f"{self.name}:{state.customer_id}"
-    self.checkpointer.delete(thread_id)
+    await self._ensure_compiled()
+    cid = getattr(state, "customer_id", None) or getattr(getattr(state, "customer", None), "id", None)
+    thread_id = f"{self.name}:{cid}"
+    await self.checkpointer.adelete_thread(thread_id)
 
   @staticmethod
   def _last_message_text(result: dict) -> str:

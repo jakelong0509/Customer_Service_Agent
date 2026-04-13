@@ -1,50 +1,61 @@
-# Architecture: Customer Service Agent (Tool API with RAG)
+# Architecture: Clinical Agent Hub (voice + email + RAG)
 
 ## Overview
 
-This system is a **voice AI customer service backend** that exposes HTTP tools for ElevenLabs/Twilio integration. It combines traditional CRUD operations with **RAG (Retrieval-Augmented Generation)** for intelligent document-based responses.
+**Clinical Agent Hub** is a **FastAPI** backend for **voice** (ElevenLabs / Twilio webhooks) and **email** (SendGrid Inbound Parse). It runs **LangGraph-style agents** defined in `app/agent_configs.json`, composed with **skills** (appointment booking, email, text normalization, clinical entity extraction, RxNorm mapping). Persistence uses **PostgreSQL**; **Redis** is initialized for call-scoped state; **Milvus** (often **Zilliz Cloud**) backs **semantic search / RAG** used inside skills (e.g. RxNorm concept search via `RAGService`).
 
 **Key Capabilities:**
-- Handle voice call tool requests from ElevenLabs
-- Customer profiles and **appointment scheduling** data in PostgreSQL (providers, slots, resource bookings)
-- Active call state caching (Redis)
-- Document-based Q&A via RAG (MinIO + Milvus)
-- Async tool handling for long operations
+- **ElevenLabs:** resolve or create customer by phone → run or end agent (`invoke_agent` → registered agent `arun`)
+- **SendGrid:** `POST /api/sendgrid/inbound` (multipart); heavy agent work should move to **RabbitMQ workers** (today may use **FastAPI `BackgroundTasks`** as a bridge)
+- Customer and **scheduling** data in PostgreSQL (`customers`, `provider_names` / `providers`, `slot_templates`, `appointments`, `appointment_resource_bookings`, `general_statuses`, `callback_requests`, plus clinical/RxNorm tables — see `docs/database.md`)
+- **Redis** client (`src/infrastructure/redis.py`) for call/session keys; full “active call” flows may evolve with product
+- **Milvus / Zilliz:** vector collections (e.g. RXNCONSO in Milvus; relational RxNorm tables in Postgres) — ingestion scripts live under `app/init_milvus.py` and `RAG_service`
+- **RabbitMQ (target):** message broker for **heavy, asynchronous work** decoupled from the HTTP layer
 
 ---
 
 ## Current Architecture (Phase 1: 100 calls/day)
 
 ```
-┌─────────────────────────────────────────────────────────────────┐
-│                     ElevenLabs / Twilio                         │
-│              (Voice AI platforms - webhook callers)             │
-└───────────────────────────┬─────────────────────────────────────┘
-                            │ HTTPS
-                            ▼
+┌────────────────────────────┐     ┌──────────────────────────────┐
+│  ElevenLabs / Twilio       │     │  SendGrid Inbound Parse      │
+│  (voice webhooks)          │     │  POST /api/sendgrid/inbound  │
+└─────────────┬──────────────┘     └──────────────┬───────────────┘
+              │ HTTPS                            │ HTTPS
+              └──────────────────┬───────────────┘
+                                 ▼
 ┌────────────────────────────────────────────────────────────────┐
-│                    Single API Server                           │
-│  ┌─────────────────────────────────────────────────────────┐   │
-│  │              FastAPI Application                        │   │
-│  │  ┌─────────────┐  ┌─────────────┐  ┌─────────────────┐  │   │
-│  │  │ API Routes  │  │   Tools     │  │  RAG Handler    │  │   │
-│  │  │ - /health   │  │ - Customer  │  │ - Query Milvus  │  │   │
-│  │  │ - /tools/run│  │ - Support   │  │ - Context build │  │   │
-│  │  │             │  │ - Handoff   │  │ - Response      │  │   │
-│  │  └─────────────┘  └─────────────┘  └─────────────────┘  │   │
-│  └─────────────────────────────────────────────────────────┘   │
+│  FastAPI — app/main.py                                         │
+│  Routers: app/controllers/routes.py                            │
+│           app/controllers/elevenlabs_controller.py             │
+│           app/controllers/sendgrid.py                          │
+│  Lifespan: init_milvus → init_pool → init_redis → create_agent │
+│  ┌──────────────────────────────────────────────────────────┐  │
+│  │  GET  /api/health                                        │  │
+│  │  GET  /api/elevenlabs/customer/{phone}                   │  │
+│  │  POST /api/elevenlabs/agent/run   → invoke_agent        │  │
+│  │  POST /api/elevenlabs/agent/end   → invoke_agent        │  │
+│  │  POST /api/sendgrid/inbound       → BackgroundTasks / MQ │  │
+│  └──────────────────────────────────────────────────────────┘  │
+│                            │                                   │
+│  ┌─────────────────────────┼─────────────────────────────────┐   │
+│  │  Agents & skills       │  src/services/, src/agents/    │   │
+│  │  agent_configs.json    │  skill_registry, dispatch_agent │   │
+│  └─────────────────────────┼─────────────────────────────────┘   │
 │                            │                                   │
 │  ┌─────────────────────────┼─────────────────────────────────┐ │
 │  │         Data Layer      │                                 │ │
-│  │  ┌──────────┐  ┌───────┴──┐  ┌──────────┐  ┌──────────┐   │ │
-│  │  │PostgreSQL│  │  Redis   │  │  Milvus  │  │  MinIO   │   │ │
-│  │  │(Primary) │  │(Session  │  │(Vector   │  │(Documents│   │ │
-│  │  │-customers│  │  Cache)  │  │ Database)│  │  Store)  │   │ │
-│  │  │-providers│  │-active   │  │-chunks   │  │-PDFs     │   │ │
-│  │  │-appts + │  │ callers  │  │-embeds   │  │-Word     │   │ │
-│  │  │ bookings│  │-temp     │  │          │  │-Text     │   │ │
-│  │  │-logs     │  │ state    │  │          │  │          │   │ │
-│  │  └──────────┘  └──────────┘  └──────────┘  └──────────┘   │ │
+│  │  ┌──────────┐  ┌───────┴──┐  ┌──────────┐                 │ │
+│  │  │PostgreSQL│  │  Redis   │  │ Milvus   │                 │ │
+│  │  │(Primary) │  │(client + │  │(Zilliz / │                 │ │
+│  │  │scheduling│  │ call keys)│  │ vectors) │                 │ │
+│  │  │+ RxNorm   │  │          │  │ RAGService│                 │ │
+│  │  │  caches   │  │          │  │ in skills │                 │ │
+│  │  └──────────┘  └──────────┘  └──────────┘                 │ │
+│  │  ┌──────────┐  ┌──────────────────────────────────────┐   │ │
+│  │  │ RabbitMQ │  │  Worker processes (target / scaling)  │   │ │
+│  │  │ (queues) │  │  Separate from uvicorn                │   │ │
+│  │  └──────────┘  └──────────────────────────────────────┘   │ │
 │  └───────────────────────────────────────────────────────────┘ │
 └────────────────────────────────────────────────────────────────┘
 ```
@@ -53,50 +64,48 @@ This system is a **voice AI customer service backend** that exposes HTTP tools f
 
 ## Component Details
 
-### 1. API Layer (`app/api/`)
+### 1. HTTP API (`app/controllers/`)
 
-| Endpoint | Purpose |
-|----------|---------|
-| `GET /api/health` | Health check for monitoring |
-| `POST /api/tools/run` | Execute tools by name with context |
-| `POST /api/rag/query` | RAG-based document Q&A |
+Routers are mounted from `app/main.py` (working directory is `app/` when running `uvicorn`).
 
-**Request Flow:**
+| Endpoint | Handler | Purpose |
+|----------|---------|---------|
+| `GET /` | `main.py` | Service id + pointer to OpenAPI `/docs` |
+| `GET /api/health` | `controllers/routes.py` | Liveness / readiness |
+| `GET /api/elevenlabs/customer/{caller_phone_number}` | `elevenlabs_controller.py` | Load or create `CustomerModel` by phone |
+| `POST /api/elevenlabs/agent/run` | `elevenlabs_controller.py` | Run agent (`ElevenLabsAgentRunRequest` → `invoke_agent`) |
+| `POST /api/elevenlabs/agent/end` | `elevenlabs_controller.py` | End-of-call agent invocation (same dispatch path) |
+| `POST /api/sendgrid/inbound` | `sendgrid.py` | SendGrid Inbound Parse (multipart form); schedules agent work (`BackgroundTasks` today; RabbitMQ later) |
+
+There is **no** standalone `POST /api/tools/run` or `POST /api/rag/query` router in the current tree. **RAG** runs **inside** services and skills (`RAGService`, RxNorm skill tools), not as a separate public HTTP RAG endpoint unless you add one.
+
+**Typical voice flow:**
 ```
-ElevenLabs → POST /api/tools/run
-    {
-      "tool_name": "lookup_customer",
-      "parameters": {"phone": "+15551234567"},
-      "call_sid": "CA123",
-      "from_number": "+15551234567"
-    }
-                 ↓
-         ┌───────────────┐
-         │ Build Context │ → CallContext (call_sid, phone, etc.)
-         └───────────────┘
-                 ↓
-         ┌───────────────┐
-         │Tool Dispatcher│ → registry.run(tool_name, args, context)
-         └───────────────┘
-                 ↓
-         ┌───────────────┐
-         │ Return Result │ → {"result": "...", "is_error": false}
-         └───────────────┘
+ElevenLabs → GET /api/elevenlabs/customer/{phone}
+          → POST /api/elevenlabs/agent/run
+                Body: ElevenLabsAgentRunRequest
+                  (agent_name, request, call_sid, caller_phone_number, email_metadata, ...)
+                     ↓
+            CustomerDA → customer row
+                     ↓
+            invoke_agent(agent_name, body, customer, call_sid)
+                     ↓
+            Agent class .arun(...)  (LangGraph / AgentBase)
+                     ↓
+            AgentRunResponse { result, is_error }
 ```
 
 ### 2. Database Layer
 
 #### PostgreSQL (Primary Data Store)
 
-**Tables:**
-- `customers` - Caller profiles, contact info
-- `providers` - Bookable resources (doctors, nurses, rooms, equipment)
-- `slot_templates` - 30-minute start times (lunch hour omitted from templates)
-- `appointments` - Booked visits (`scheduled_at`, status, notes)
-- `appointment_resource_bookings` - Per-resource slot reservations (created on confirm; unique per provider/date/slot prevents double booking)
-- `callback_requests` - Scheduled callbacks
-- `tool_logs` - JSONB logs of all tool executions
-- `documents` - Metadata linking to MinIO files
+**Scheduling & CRM (authoritative DDL: `app/init_db/create_tables.sql`):**
+- `customers`, `provider_names`, `providers`, `slot_templates`, `general_statuses`, `appointments`, `appointment_resource_bookings`, `callback_requests`
+
+**Clinical / RxNorm (relational cache in Postgres; RXNCONSO vectors in Milvus):**
+- `clinical_note_embeddings`, `umls_concepts`, `rxnorm_relationships`, `rxnorm_attributes`, `rxnorm_semantic_types`, `rxnorm_documentation`, `drug_interactions`
+
+There is **no** `tool_logs` or `documents` table in the current `create_tables.sql`. Full column lists and indexes: **`docs/database.md`**.
 
 **Why PostgreSQL:**
 - ACID compliance for transactions
@@ -104,176 +113,113 @@ ElevenLabs → POST /api/tools/run
 - Full-text search (backup for RAG)
 - Mature, well-understood
 
-#### Redis (Session Cache)
+#### Redis (session / call-scoped state)
 
-**Cache Pattern:**
-```
-Call Starts:
-  PostgreSQL ──▶ Redis (active:call_sid)
-                      ├─ customer info
-                      ├─ customer / appointment context
-                      ├─ conversation state
-                      └─ TTL: 1 hour
+**Implementation:** `src/infrastructure/redis.py` — async client, initialized in `main.py` lifespan. Helpers such as `get_call_state` / `set_call_state` support **per-`call_sid`** keys with TTL.
 
-During Call:
-  All reads from Redis (sub-millisecond)
-
-Call Ends:
-  Redis ──▶ Update PostgreSQL (if changes)
-         ──▶ DEL active:call_sid
-```
+**Intended use:** fast ephemeral state during voice or multi-step flows (conversation/thread hints, lightweight caches). Customer-of-record remains **PostgreSQL**.
 
 **Why Redis:**
-- Fast lookups during voice conversation
-- Reduces PostgreSQL load
-- Handles temporary conversation state
+- Low-latency key/value for active-session data
+- TTL-based expiry without manual cleanup in many cases
 
-#### Milvus (Vector Database)
+#### RabbitMQ (message broker)
 
-**RAG Pipeline:**
+**Role:** Hold **jobs/messages** between “the HTTP request accepted work” and “a worker finished processing.” This is **not** Redis: RabbitMQ is the **queue**, Redis remains **session/cache**.
+
+**Why RabbitMQ (vs in-process `BackgroundTasks` only):**
+- **Durability:** Messages survive API process restarts and deploys (within broker configuration).
+- **Backpressure:** Bursts (e.g. many SendGrid inbound webhooks) **queue** instead of piling unbounded heavy agent work in one API process.
+- **Horizontal scaling:** Multiple API replicas **publish** to the same queues; **worker** processes (separate containers/hosts) **consume** at a controlled concurrency.
+- **Retries / DLQ:** Failed handling can be retried or routed to a **dead-letter queue** for inspection.
+
+**Typical flow (inbound email → agent):**
 ```
-Document Upload:
-  Employee → MinIO (store PDF/Word)
-         → Text Extraction
-         → Chunk into segments
-         → Generate embeddings (OpenAI/Local model)
-         → Store in Milvus (vector + metadata)
+SendGrid POST /api/sendgrid/inbound
+       │
+       ▼
+FastAPI validates, builds payload ── publish ──▶ RabbitMQ (exchange → queue)
+       │
+       ▼
+HTTP 200 (acknowledge webhook quickly)
+       
+       ... async ...
 
-Query Flow:
-  Caller asks question
-         → Convert to embedding
-         → Milvus similarity search (top_k=5)
-         → Retrieve relevant chunks
-         → Build context for AI response
-         → Return natural language answer
+Worker process ── consume message ──▶ run agent / tools ──▶ ack or nack
 ```
+
+**Implementation options:** **Celery** with RabbitMQ as broker, **Kombu**, **aio-pika** / **pika**, or another AMQP client—broker choice is **RabbitMQ**; worker code lives in **separate processes** from `uvicorn`.
+
+**Note:** Until workers are deployed, the app may still use **FastAPI `BackgroundTasks`** as a stepping stone; production-scale, multi-replica setups should **publish to RabbitMQ** instead of relying on in-process background tasks alone.
+
+#### Milvus (vector database — Zilliz Cloud compatible)
+
+**Client:** `src/infrastructure/milvus.py` — `MilvusClient`, `init_milvus()` at startup. Configure with **`MILVUS_CLUSTER_ENDPOINT`** (include **`:443`** for Zilliz HTTPS URLs) and **`MILVUS_COLLECTION_TOKEN`**. If unset, `init_milvus()` skips connection (skills that need Milvus will require it).
+
+**RAG in this repo:** `src/services/RAG_service.py` embeds text (e.g. HuggingFace / PubMedBERT-style models in ingestion scripts), ingests **RRF** / structured files into collections, and runs **hybrid / semantic search** used from skill code (notably **RxNorm** flows in `rxnorm_mapping_skill`).
+
+**Typical pipeline (ingestion):**
+```
+RxNorm RRF / exports → ingest_local / DB ingest (init_milvus.py, db_service)
+                    → embeddings → Milvus collections (e.g. RXNCONSO)
+                    → relational rows → PostgreSQL (RXNREL, RXNDOC, …)
+```
+
+**Query path (runtime):** Skill tools call `RAGService` → Milvus search → results to the agent.
 
 **Why Milvus:**
-- Optimized for high-dimensional vector search
-- Handles millions of document chunks
-- Sub-second semantic search
+- Built for billion-scale vector search; fits clinical term / concept retrieval
 
-#### MinIO (Object Storage)
-**reason:**
-- Allow user to store unstructured daeta (images, videos, logs, etc..)
-- S3 compatibility: Use amazon S3 REST API, allowing applications written for AWS to run seamlessly on MinIO
-- High Perfomance
-- Deplyment Flexibility: Bare metal, public cloud, kubernetes environments
-- Enterprise-Grade Security
-- Scalability & Resilience
+#### Object storage (optional, not in current `app/` tree)
 
-**Storage:**
-- Raw documents (PDF, Word, Excel, TXT)
-- Extracted text files (for backup)
-- Call recordings (if enabled in future)
-- Exported reports
-
-**Why MinIO:**
-- S3-compatible API
-- Self-hosted (data control)
-- Cost-effective for files
+**S3-compatible storage (e.g. MinIO)** is a common addition for **raw uploads** (PDFs, images) before extraction. This repository does **not** yet include a MinIO client module; ingestion examples use **local file paths** (see `init_milvus.py`). Add object storage when you implement a full document-upload pipeline.
 
 ---
 
-## Tool Registry System
+## Agents and skills (not a legacy “tool registry” HTTP layer)
 
-```python
-# Tool Registration Pattern
-@app.tools.registry.register("lookup_customer")
-async def lookup_customer(arguments: dict, context: CallContext) -> str:
-    # 1. Check Redis cache first
-    cached = await redis.get(f"customer:{context.from_number}")
-    if cached:
-        return cached
-    
-    # 2. Query PostgreSQL
-    customer = await db.fetchrow(
-        "SELECT * FROM customers WHERE phone = $1",
-        context.from_number
-    )
-    
-    # 3. Cache in Redis
-    await redis.setex(f"customer:{context.from_number}", 300, json.dumps(customer))
-    
-    return format_customer_response(customer)
-```
+**Configuration:** `app/agent_configs.json` lists agents with `system_prompt_path`, `llm`, `skill_names`, `communication_type` (`voice` | `email` | `chat`), and optional `state_class`.
 
-**Available Tools:**
+**Runtime:** `src/services/agent_registry.py` + `src/agents/agent_factory.py` build **LangGraph** agents. `invoke_agent` in `src/services/dispatch_agent.py` resolves `get_agent(agent_name)` and calls **`await agent.arun(request, customer, session_id)`**.
 
-| Category | Tools |
-|----------|-------|
-| **Customer** | `lookup_customer`, `get_account_info` |
-| **Support** | `create_ticket`, `check_refund_eligibility`, `request_refund` (stubs; no backing tables in current schema) |
-| **Scheduling** | `create_appointment` (writes `appointments`; resource bookings and availability search to be wired in app code) |
-| **Handoff** | `transfer_to_agent`, `schedule_callback` |
-| **RAG** | `query_knowledge_base` |
+**Registered agents (from config):**
+| Agent name | Role (summary) |
+|------------|------------------|
+| `customer_support_agent` | Voice; skills: appointment, email |
+| `customer_support_agent_email` | Email; appointment skill |
+| `security_agent` | Security / verification (`SecurityAgentState`) |
+| `rxnorm_mapping_agent_email` | Email; text normalize → clinical entities → RxNorm + Milvus |
+
+**Shared tools (memory / skills):** `activate_skill`, `deactivate_skill`, `retrieve_conversation_history`, `store_conversation_history`, `store_session_outcome`, `find_similar_sessions` — see `src/agents/shared_tools/`.
+
+**Skills:** `app/src/skills/*/` — each has `SKILL.md` and `scripts/tools.py` (e.g. `appointment_booking_skill`, `email_skill`, `text_normalize_skill`, `clinical_entity_extraction_skill`, `rxnorm_mapping_skill`).
 
 ---
 
 ## RAG (Retrieval-Augmented Generation) Flow
 
-### Document Ingestion
-```
-Employee Upload
-      │
-      ▼
-┌─────────────┐
-│   MinIO     │ ── Store raw file
-└──────┬──────┘
-       │
-       ▼
-┌─────────────┐
-│   Extract   │ ── Text extraction (PDF miner, docx2txt)
-│   + Chunk   │ ── Split into 500-token chunks with overlap
-└──────┬──────┘
-       │
-       ▼
-┌─────────────┐
-│  Embed      │ ── Generate vector embeddings
-│  (OpenAI)   │
-└──────┬──────┘
-       │
-       ▼
-┌─────────────┐
-│   Milvus    │ ── Store (vector + text + metadata)
-└─────────────┘
-```
+### Ingestion (as implemented)
 
-### Query Flow
+Batch / operator-driven flows use **`app/init_milvus.py`** and **`RAGService.ingest_local`** to read **RRF** (or similar) files, embed with the configured embedding model, and load **Milvus** collections. **`db_service`** can load companion rows into **PostgreSQL** for relational joins and SQL filters.
+
+### Query flow (runtime)
+
+There is **no** dedicated **`POST /api/rag/query`** route. Retrieval happens **inside agent turns** when a **skill** calls **`RAGService`** (e.g. semantic search over **RXNCONSO** or related collections in **`rxnorm_mapping_skill`**).
+
 ```
-Caller: "What's the return policy?"
-              │
-              ▼
-    ┌─────────────────┐
-    │  ElevenLabs AI  │ ── Detects knowledge need
-    └────────┬────────┘
-             │
-             ▼
-    ┌─────────────────┐
-    │ POST /rag/query │ ── Send to backend
-    │ { "query": "..."}│
-    └────────┬────────┘
-             │
-             ▼
-    ┌─────────────────┐
-    │  Embed Query    │ ── Same embedding model
-    └────────┬────────┘
-             │
-             ▼
-    ┌─────────────────┐
-    │  Milvus Search  │ ── Similarity search
-    │  (top_k=5)      │
-    └────────┬────────┘
-             │
-             ▼
-    ┌─────────────────┐
-    │  Build Context  │ ── Combine chunks
-    └────────┬────────┘
-             │
-             ▼
-    ┌─────────────────┐
-    │ Return Response │ ── Natural language answer
-    └─────────────────┘
+User message (voice or email)
+       │
+       ▼
+  POST …/agent/run  or  email pipeline
+       │
+       ▼
+  invoke_agent → agent + active skills
+       │
+       ▼
+  Skill tool → RAGService → Milvus (± Postgres for RXNREL / RXNDOC / …)
+       │
+       ▼
+  Model uses retrieved rows in its reply
 ```
 
 ---
@@ -284,13 +230,13 @@ Caller: "What's the return policy?"
 **Solution:** Async pattern with ElevenLabs conversation management
 
 ```
-Scenario: A long-running tool job (e.g. external scheduling API) takes 2 minutes
+Scenario: A long-running agent or tool step (e.g. external API) takes minutes
 
 ElevenLabs                    Our API
 ──────────                    ───────
    │                             │
-   │──POST /tools/run───────────▶│
-   │  {tool: "slow_operation"}  │
+   │──POST /api/elevenlabs/agent/run ▶│
+   │  { agent_name, request, … }  │
    │                             │
    │◀───Immediate Response──────│
    │  {"result": "Processing...", │
@@ -309,34 +255,22 @@ ElevenLabs                    Our API
 ```
 
 **Implementation:**
-- For Phase 1: Use Celery + Redis as message broker
-- At 100 calls/day: Can use simple background threads
-- PostgreSQL table: `async_jobs` to track job status
+- **Broker:** **RabbitMQ** for durable queues and worker consumption (see [RabbitMQ (message broker)](#rabbitmq-message-broker)).
+- **Workers:** Separate processes that consume from RabbitMQ and execute long tasks (agents, integrations). Scale workers independently of the API.
+- **Low volume / dev:** In-process `BackgroundTasks` may suffice; **multiple API replicas** or **heavy agents** should use RabbitMQ.
+- **Optional:** PostgreSQL table `async_jobs` (or equivalent) to expose **job_id** status to callers when the product needs polling.
 
 ---
 
 ## Security & Access Control
 
 ### Document Security (RAG)
-```sql
--- documents table with access control
-CREATE TABLE documents (
-    id UUID PRIMARY KEY,
-    company_id UUID REFERENCES companies(id),
-    minio_path VARCHAR(500),
-    milvus_id VARCHAR(100),
-    access_level VARCHAR(50), -- 'public', 'agents_only', 'admin_only'
-    uploaded_by UUID,
-    created_at TIMESTAMPTZ
-);
 
--- RAG query only searches docs where company_id matches caller's company
-```
+Future hardening often adds a **`documents`** (or similar) table with **tenant / company id**, **object-store path**, and **access level**, and restricts Milvus metadata queries accordingly. **That table is not in the current `create_tables.sql`.** Implement when you add user-visible document upload and multi-tenant RAG.
 
 ### Authentication
-- **No user authentication** (internal ElevenLabs webhooks)
-- **API key validation** for employee document upload endpoints
-- **Rate limiting** to prevent abuse
+- **ElevenLabs / SendGrid** webhooks should be **locked down** in production (e.g. verify SendGrid signatures, IP allowlists, secrets for internal routes) — tighten per your threat model
+- **Rate limiting** on public endpoints as traffic grows
 
 ---
 
@@ -350,12 +284,13 @@ CREATE TABLE documents (
 | PostgreSQL connections | PostgreSQL | > 80% max |
 | Redis memory usage | Redis | > 85% |
 | Milvus query latency | Milvus | > 200ms |
+| RabbitMQ queue depth / consumer lag | RabbitMQ | Sustained growth / lag above SLO |
 | Error rate | Application | > 1% |
 
 **Logging Strategy:**
-- Application logs → CloudWatch
-- Tool execution logs → PostgreSQL JSONB
-- Access logs → S3 (via ALB when added)
+- Application logs → your log aggregator (e.g. CloudWatch, Datadog)
+- Optional: persist agent or audit trails in PostgreSQL when you add tables for that purpose
+- Access logs from load balancer when deployed behind ALB/API gateway
 
 ---
 
@@ -389,117 +324,99 @@ When you hit higher scale, add:
                     │
               ┌─────┴─────┐
               ▼           ▼
-         ┌────────┐  ┌────────┐
-         │ MinIO  │  │ Message│
-         │Cluster │  │ Queue  │
-         │        │  │(Celery)│
-         └────────┘  └────────┘
-              │
-              ▼
-         ┌────────┐
-         │Background│
-         │Workers  │
-         └────────┘
+         ┌────────┐  ┌────────────┐
+         │ S3 /   │  │ RabbitMQ   │
+         │MinIO   │  │ (broker)   │
+         │(opt.)  │  │            │
+         └────────┘  └─────┬──────┘
+                         │
+                         ▼
+                   ┌───────────┐
+                   │  Workers  │
+                   │ (consumers)│
+                   └───────────┘
 ```
 
 **Additions:**
 - Load balancer for high availability
 - Redis Sentinel for HA
 - PostgreSQL read replica
-- Message queue (Celery + Redis/SQS)
-- Background worker processes
+- **RabbitMQ** (HA cluster or managed service) for job queuing
+- **Worker** processes consuming from RabbitMQ (scale independently of API)
 
 ---
 
-## Folder Structure
+## Folder structure (actual layout)
 
 ```
 app/
-├── api/
-│   ├── routes.py           # HTTP endpoints
-│   └── middleware.py       # Logging, request ID
-├── services/
-│   ├── tool_dispatcher.py  # Tool execution orchestrator
-│   ├── rag_service.py      # RAG query handler
-│   └── job_queue.py        # Async job management
-├── tools/
-│   ├── registry.py         # Tool registration system
-│   ├── customer_tools.py   # Customer lookup tools
-│   ├── support_tools.py    # Support stubs (tickets/refunds)
-│   ├── handoff_tools.py    # Transfer/callback tools
-│   └── rag_tools.py        # Knowledge base query
-├── models/
-│   ├── conversation.py     # CallContext
-│   ├── customer.py         # Pydantic models
-│   └── document.py         # Document metadata
-├── infrastructure/
-│   ├── database.py         # PostgreSQL pool
-│   ├── redis.py            # Redis client
-│   ├── milvus.py           # Vector DB client
-│   └── minio.py            # Object storage client
-├── rag/
-│   ├── document_processor.py # Text extraction, chunking
-│   ├── embedding.py        # Vector generation
-│   └── retriever.py          # Milvus query builder
-└── main.py                 # FastAPI app factory
+├── main.py                 # FastAPI app, lifespan, router includes
+├── agent_configs.json      # Agent definitions (skills, prompts, LLM)
+├── controllers/            # HTTP routers
+│   ├── routes.py           # GET /api/health
+│   ├── elevenlabs_controller.py
+│   └── sendgrid.py
+├── src/
+│   ├── agents/             # agent_factory, per-agent prompts/state
+│   ├── core/               # config, customer models, agent run requests
+│   ├── infrastructure/     # database, redis, milvus
+│   ├── services/           # agent_registry, dispatch_agent, RAG_service, skill_registry, db_service
+│   ├── skills/             # SKILL.md + scripts per skill
+│   └── utils/
+├── DAL/                    # e.g. customerDA
+├── init_db/                # create_tables.sql, seeds
+└── init_milvus.py          # Milvus / DB ingestion helpers (operator scripts)
 ```
 
 ---
 
-## Environment Variables
+## Environment variables (aligned with `src/core/config.py`)
 
 ```bash
-# PostgreSQL
+# PostgreSQL — asyncpg URL (either name works in Settings)
 DATABASE_URL=postgresql://user:pass@localhost:5432/customer_service
+POSTGRES_CONNECTION_STRING=postgresql://user:pass@localhost:5432/customer_service
 
 # Redis
 REDIS_HOST=localhost
 REDIS_PORT=6379
+REDIS_USERNAME=optional
 REDIS_PASSWORD=optional
 
-# Milvus
-MILVUS_HOST=localhost
-MILVUS_PORT=19530
-MILVUS_COLLECTION=document_chunks
+# Milvus / Zilliz — public endpoint, include :443 for HTTPS serverless
+MILVUS_CLUSTER_ENDPOINT=https://in03-xxxxx.cloud.zilliz.com:443
+MILVUS_COLLECTION_TOKEN=your_zilliz_token_or_user_password
 
-# MinIO
-MINIO_ENDPOINT=localhost:9000
-MINIO_ACCESS_KEY=minioadmin
-MINIO_SECRET_KEY=minioadmin
-MINIO_BUCKET=documents
-
-# Embeddings
-OPENAI_API_KEY=sk-...  # or local model endpoint
-EMBEDDING_MODEL=text-embedding-ada-002
+# RabbitMQ (when you add publishers/consumers)
+RABBITMQ_URL=amqp://guest:guest@localhost:5672/
 
 # App
 LOG_LEVEL=INFO
 ENVIRONMENT=development
-TOOL_TIMEOUT_SECONDS=30
 ```
+
+Embedding models and API keys for LLMs are typically set via **environment** or your agent factory; see `agent_configs.json` and deployment secrets. **MinIO** variables are not used by the current codebase until you add an object-storage client.
 
 ---
 
 ## Summary
 
 This architecture supports:
-- **100 calls/day** (current) with single server
-- **RAG-powered** responses from company documents
-- **Sub-second** customer lookups via Redis cache
-- **Async handling** for long-running operations
-- **Clear upgrade path** to distributed architecture
+- **Voice** flows via **ElevenLabs** routes and **LangGraph** agents + skills
+- **Email** flows via **SendGrid** inbound webhook (scale-out path: **RabbitMQ** + workers)
+- **PostgreSQL** for CRM, scheduling, and RxNorm **relational** tables; **Milvus** for **RXNCONSO** (and related) vectors consumed through **`RAGService`**
+- **Clear upgrade path:** load-balanced APIs, Redis HA, RabbitMQ cluster, worker pools
 
 **Key Decisions:**
-- ✅ PostgreSQL: Single source of truth
-- ✅ Redis: Active call state only (not persistent data)
-- ✅ Milvus: Required for RAG vector search
-- ✅ MinIO: Document storage with extraction pipeline
-- ✅ No MongoDB: Logs in PostgreSQL JSONB
-- ✅ No load balancer yet: Add when scaling
+- ✅ **PostgreSQL:** Single source of truth for relational data (see `docs/database.md`)
+- ✅ **Redis:** Initialized for session/call keys (`src/infrastructure/redis.py`)
+- ✅ **Milvus / Zilliz:** Vector search for skill-driven RAG (config via `MILVUS_*`)
+- ✅ **RabbitMQ (target):** Offload heavy async work from `uvicorn` processes
+- ✅ **No MinIO in repo yet:** add when implementing upload + extraction pipelines
+- ✅ **Agents + skills** (`invoke_agent` / LangGraph) instead of a standalone **`POST /api/tools/run`** tool registry
 
 **Next Steps:**
-1. Implement document ingestion pipeline
-2. Build RAG query endpoint
-3. Add Redis caching to customer tools
-4. Set up monitoring (CloudWatch/Datadog)
-5. Test async tool pattern with ElevenLabs
+1. Harden **SendGrid** and **ElevenLabs** webhook security (signatures, auth, rate limits)
+2. **RabbitMQ:** publish on inbound email; worker process consuming and running `invoke_agent`
+3. Monitoring: API latency, **Milvus** errors, **Postgres** pool, **RabbitMQ** depth, agent failure rate
+4. Optional: generic **document upload** pipeline + tenant-aware RAG tables when product requires it

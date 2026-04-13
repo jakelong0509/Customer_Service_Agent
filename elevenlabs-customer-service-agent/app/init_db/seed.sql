@@ -136,3 +136,28 @@ VALUES
     (gen_random_uuid(), 'bbbbbbbb-0005-4000-8000-000000000005', 'aaaaaaaa-0001-4000-8000-000000000001', CURRENT_DATE - 3, 9, (SELECT id FROM general_statuses WHERE name = 'cancelled' LIMIT 1)),
     (gen_random_uuid(), 'bbbbbbbb-0005-4000-8000-000000000005', 'aaaaaaaa-0003-4000-8000-000000000001', CURRENT_DATE - 3, 9, (SELECT id FROM general_statuses WHERE name = 'cancelled' LIMIT 1))
 ON CONFLICT (provider_id, booking_date, slot_template_id) DO NOTHING;
+
+---- SPLIT ----
+
+-- Demo inventory: NDC values must exist in rxnorm_attributes (RXNSAT) for lookups to work.
+-- In RxNorm RRF loads, NDC is stored in ATV — usually as an 11-character digit string (no dashes);
+-- see docs/RAG_RXNORM.md. Static made-up NDCs will not appear in RXNSAT.
+-- This block samples up to 100 distinct ATV values from your loaded RXNSAT (non-suppressed rows).
+-- Run AFTER RxNorm RXNSAT data is ingested into rxnorm_attributes; otherwise inserts 0 rows.
+-- Replace drug_name labels with your formulary text as needed.
+INSERT INTO inventory (drug_name, ndc)
+SELECT 'Clinic formulary item ' || LPAD(seq::text, 3, '0'), atv
+FROM (
+    SELECT atv, ROW_NUMBER() OVER (ORDER BY atv) AS seq
+    FROM (
+        SELECT DISTINCT atv
+        FROM rxnorm_attributes
+        WHERE atn = 'NDC'
+          AND (suppress IS NULL OR suppress = 'N')
+          AND atv IS NOT NULL
+          AND btrim(atv) <> ''
+    ) AS distinct_ndc
+    LIMIT 100
+) AS picked
+WHERE NOT EXISTS (SELECT 1 FROM inventory)
+  AND EXISTS (SELECT 1 FROM rxnorm_attributes WHERE atn = 'NDC' LIMIT 1);

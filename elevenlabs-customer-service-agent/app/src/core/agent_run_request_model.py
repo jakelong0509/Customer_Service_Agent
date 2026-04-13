@@ -10,23 +10,15 @@ class ElevenLabsAgentRunRequest(AgentRunRequest):
     caller_phone_number: str = Field(..., description="Caller phone number")
     email_metadata: dict = Field(..., description="Email metadata")
 
-class SendGridInboundRequest(BaseModel):
+class SendGridInboundRequest(AgentRunRequest):
     """Request model for SendGrid Inbound Parse webhook.
     SendGrid sends data as multipart/form-data with these field names.
     """
-    from_email: str = Field(alias="from", description="Sender email address (From: header)")
+    message_id: str = Field(..., description="Message-ID of the email")
+    from_email: str = Field(..., description="Sender email address (From: header)")
     to: str = Field(..., description="Recipient email address (To: header)")
     subject: str | None = Field(default=None, description="Email subject")
-    text: str | None = Field(default=None, description="Plain text body")
-    html: str | None = Field(default=None, description="HTML body content")
-    headers: str | None = Field(default=None, description="Raw email headers")
-    attachments: int | None = Field(default=None, description="Number of attachments")
-    dkim: str | None = Field(default=None, description="DKIM verification result")
-    SPF: str | None = Field(default=None, description="SPF verification result")
-    envelope: str | None = Field(default=None, description="JSON envelope with to/from")
-    charsets: str | None = Field(default=None, description="JSON charset information")
-    spam_score: str | None = Field(default=None, description="Spam score")
-    spam_report: str | None = Field(default=None, description="Spam report details")
+    references: str | None = Field(default=None, description="Comma-separated previous Message-IDs in the thread")
 
 
 class AgentRunResponse(BaseModel):

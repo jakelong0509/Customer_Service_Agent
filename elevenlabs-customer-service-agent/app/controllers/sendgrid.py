@@ -1,15 +1,31 @@
 # HTTP routes — health and tool API for SendGrid Inbound Parse webhook
-from fastapi import APIRouter, HTTPException, Form
-from typing import Optional
+import logging
 import json
 import re
-from src.services.dispatch_agent import invoke_agent
-from src.core.agent_run_request_model import ElevenLabsAgentRunRequest, AgentRunResponse
+from typing import Optional
 
+from fastapi import APIRouter, BackgroundTasks, Form
+
+from src.services.dispatch_agent import invoke_agent
+from src.core.agent_run_request_model import SendGridInboundRequest
+from fastapi.responses import Response
 from src.core.customer import CustomerModel
 from DAL.customerDA import CustomerDA
 
 router = APIRouter(prefix="/api/sendgrid", tags=["api"])
+logger = logging.getLogger(__name__)
+
+
+async def _run_inbound_agent(
+    agent_name: str,
+    agent_request: SendGridInboundRequest,
+    customer: CustomerModel | None,
+    session_id: str,
+) -> None:
+    try:
+        await invoke_agent(agent_name, agent_request, customer, session_id)
+    except Exception:
+        logger.exception("SendGrid inbound background agent failed (agent=%s)", agent_name)
 
 
 def extract_message_id(headers: str | None) -> str | None:
@@ -42,8 +58,9 @@ def extract_references(headers: str | None) -> list[str]:
     return []
 
 
-@router.post("/inbound", response_model=AgentRunResponse)
+@router.post("/inbound")
 async def sendgrid_inbound(
+    background_tasks: BackgroundTasks,
     from_email: str = Form(..., alias="from"),
     to: str = Form(...),
     subject: Optional[str] = Form(None),
@@ -86,53 +103,48 @@ async def sendgrid_inbound(
         # Look up customer by email
         customer = await CustomerDA().get_customer_by_email_address(from_addr)
         
-        # Create a unique conversation ID for this email thread
-        # Use Message-ID if available for more accurate threading
-        thread_id = message_id.strip('<>').replace('@', '_').replace('.', '_') if message_id else f"{from_addr.replace('@', '_')}_{subject or 'no_subject'}"
-        conversation_id = f"email_{thread_id[:200]}"  # Limit length
-        
-        # Store email metadata in the request for the agent to save
-        # The agent should store: message_id, from_addr, to, subject in conversation history
-        email_metadata = {
-            "message_id": message_id,
-            "from": from_addr,
-            "to": to,
-            "subject": subject,
-            "references": references,
-        }
-        
-        # Build agent run request with email metadata
-        # full_request = f"""{email_str}
+        print(f"request: {email_str}")
+        print(f"message_id: {message_id}")
+        print(f"from_email: {from_addr}")
+        print(f"to: {to}")
+        print(f"subject: {subject}")
+        print(f"references: {references}")
 
-        # EMAIL_METADATA: {json.dumps(email_metadata)}
+        agent_request: SendGridInboundRequest | None = None
+        if "rxnorm" in to:
+            agent_request = SendGridInboundRequest(
+                agent_name="rxnorm_mapping_agent_email",
+                request=email_str,
+                message_id=message_id,
+                from_email=from_addr,
+                to=to,
+                subject=subject,
+                references=", ".join(references),
+            )
 
-        # Instructions: When replying to this email, activate the skill **email_skill** and call the tool **reply_to_email** and pass the following parameters: 
-        # - original_message_id: {message_id}
-        # - original_sender: {from_addr}
-        # - original_subject: {subject}
-        # - references: {references}
-        # """
-        
-        
-        agent_request = ElevenLabsAgentRunRequest(
-            agent_name="customer_support_agent_email",
-            request=email_str,
-            call_sid=conversation_id[:255],
-            caller_phone_number=from_addr,
-            email_metadata=email_metadata
-        )
-        
-        # Process through agent
-        result = await invoke_agent(
-            agent_request.agent_name,
-            agent_request,
-            customer,
-            agent_request.call_sid
-        )
-        
-        is_error = result.startswith("Error:") if isinstance(result, str) else False
-        return AgentRunResponse(result=result, is_error=is_error)
+        elif "support" in to:
+            agent_request = SendGridInboundRequest(
+                agent_name="customer_support_agent_email",
+                request=email_str,
+                message_id=message_id,
+                from_email=from_addr,
+                to=to,
+                subject=subject,
+                references=", ".join(references),
+            )
+
+        if agent_request is not None:
+            session_id = message_id or ""
+            background_tasks.add_task(
+                _run_inbound_agent,
+                agent_request.agent_name,
+                agent_request,
+                customer,
+                session_id,
+            )
+
+        return Response(status_code=200)
         
     except Exception as e:
         print(f"Error processing inbound email: {e}")
-        raise HTTPException(status_code=500, detail=f"Error processing email: {str(e)}") from e
+        return Response(status_code=200)

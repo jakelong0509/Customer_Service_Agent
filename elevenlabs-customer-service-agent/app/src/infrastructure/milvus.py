@@ -31,10 +31,13 @@ def init_milvus(timeout: float = 30.0) -> MilvusClient | None:
             token=settings.milvus_collection_token or "",
             timeout=timeout,
         )
+        print(f"Milvus client initialized: {_client}")
         return _client
     except Exception as e:
-        print(f"Failed to initialize Milvus: {e}")
-        return None
+        print(f"ERROR: Failed to initialize Milvus: {e}")
+        import traceback
+        traceback.print_exc()
+        raise RuntimeError(f"Milvus initialization failed: {e}") from e
 
 def get_milvus() -> MilvusClient:
   if _client is None:

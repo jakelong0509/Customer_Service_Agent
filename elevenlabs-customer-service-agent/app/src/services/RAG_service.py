@@ -20,14 +20,17 @@ if str(_project_root) not in sys.path:
 import warnings
 warnings.filterwarnings('ignore')
 
-_milvus_client = get_milvus()
-
 class RAGService:
   def __init__(
       self,
       embedding_model: Embeddings
   ):
     self._embedding_model = embedding_model
+
+  @staticmethod
+  def _get_client():
+    """Lazy Milvus client accessor, avoids module level import crash."""
+    return get_milvus()
 
   async def _embed_text(self, texts: List[str]) -> List[List[float]]:
     vector = await self._embedding_model.aembed_documents(texts)
@@ -97,10 +100,44 @@ class RAGService:
       for i, emb in enumerate(embeddings):
           rows_to_embed[i]["vector"] = emb
       # Insert into Zilliz — every row
-      _milvus_client.insert(
+      self._get_client().insert(
           collection_name=collection_name,
           data=rows_to_embed,
       )
+
+  async def runtime_milvus_ingest(
+    self,
+    collection_name: str,
+    data: List[Dict],
+    vector_columns: List[str],
+    scalar_columns: List[str],
+  ) -> None:
+    """Ingest data into Milvus vector database at runtime
+    Args:
+        collection_name: name of Milvus collection to ingest into
+        data: list of dictionaries to ingest
+        vector_columns: list of column names to use for vectorization (will be concatenated if multiple)
+        scalar_columns: list of column names to include as metadata (non-vector) in Milvus
+    """
+    assert collection_name != "", "Collection name must be provided"
+    assert data != "", "Data must be provided"
+    assert vector_columns != "", "Vector columns must be provided"
+    assert scalar_columns != "", "Scalar columns must be provided"
+    rows_to_embed = []
+    for row in data:
+      str_concatenated = " ".join([row[col] for col in vector_columns if col in row])
+      if not str_concatenated.strip():
+        continue
+      row_dict = {}
+      for col in scalar_columns:
+        row_dict[col.lower()] = row[col] if col in row else None
+      row_dict["vector"] = (await self._embed_text([str_concatenated]))[0]
+      rows_to_embed.append(row_dict)
+
+    self._get_client().insert(
+      collection_name=collection_name,
+      data=rows_to_embed
+    )
 
 
   async def milvus_hybrid_search(
@@ -139,7 +176,7 @@ class RAGService:
       expr = filter
     )
 
-    results = _milvus_client.hybrid_search(
+    results = self._get_client().hybrid_search(
       collection_name=collection_name,
       reqs = [request],
       ranker = RRFRanker(),
@@ -164,7 +201,7 @@ class RAGService:
     assert filter != "", "Filter must be provided"
 
     # Search
-    results = _milvus_client.query(
+    results = self._get_client().query(
       collection_name=collection_name,
       filter=filter,
       output_fields=output_fields
@@ -190,14 +227,13 @@ class RAGService:
     assert collection_name != "", "Collection name must be provided"
     assert query != "", "Query must be provided"
     assert k > 0, "k must be greater than 0"
-    assert filter != "", "Filter must be provided"
 
     # Embed query
     query_embedding = await self._embed_text([query])
     query_embedding = query_embedding[0]
 
     # Search
-    results = _milvus_client.search(
+    results = self._get_client().search(
       collection_name=collection_name,
       data=[query_embedding],
       limit=k,
@@ -208,3 +244,4 @@ class RAGService:
     if results and len(results) > 0:
         return results[0]  # ← Return just the hits, not wrapped in outer list
     return []
+
