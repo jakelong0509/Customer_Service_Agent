@@ -42,7 +42,6 @@ async def test_rxnorm_mapping_agent():
     """Test RxNorm mapping agent functionality."""
     init_milvus()
     await asyncio.wait_for(init_pool(), timeout=10.0)
-    print(f"Database initialized: {get_pool()}")
     create_agent()
     agent = get_agent("rxnorm_mapping_agent_email")
     assert agent is not None
@@ -84,8 +83,8 @@ async def test_rxnorm_mapping_agent():
         agent_name="rxnorm_mapping_agent_email",
         request=_MESSY_CLINICAL_NOTE,
     )
-    customer = await CustomerDA().get_customer_by_email_address("jakelong0509@gmail.com")
-    response = await agent.arun(request, customer, "test-session-id-3")
+    customer = await  asyncio.wait_for(CustomerDA().get_customer_by_email_address("jakelong0509@gmail.com"), timeout=10.0)
+    response = await asyncio.wait_for(agent.arun(request, customer, "test-session-id-3"), timeout=10.0)
     assert response is not None
 
     # Manual inspection: normalization + entity extraction + mapping quality
