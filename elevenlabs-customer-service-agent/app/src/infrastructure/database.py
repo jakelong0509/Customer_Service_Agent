@@ -25,6 +25,7 @@ async def init_pool() -> asyncpg.Pool:
 def get_pool() -> asyncpg.Pool:
     """Return the current pool. Raises if pool not initialized."""
     print(f"Database pool: {_pool}")
+    global _pool
     if _pool is None:
         raise RuntimeError("Database pool not initialized. Call init_pool() at startup.")
     return _pool
