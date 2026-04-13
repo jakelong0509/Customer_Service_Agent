@@ -4,7 +4,7 @@ import pytest
 
 from app.src.services.agent_registry import create_agent, AGENTS, get_agent
 from app.src.infrastructure.milvus import init_milvus, close_milvus
-from app.src.infrastructure.database import init_pool, close_pool
+from app.src.infrastructure.database import init_pool, close_pool, get_pool
 from app.src.core.agent_run_request_model import AgentRunRequest
 from app.DAL.customerDA import CustomerDA
 
@@ -42,6 +42,7 @@ async def test_rxnorm_mapping_agent():
     """Test RxNorm mapping agent functionality."""
     init_milvus()
     await asyncio.wait_for(init_pool(), timeout=10.0)
+    print(f"Database initialized: {get_pool()}")
     create_agent()
     agent = get_agent("rxnorm_mapping_agent_email")
     assert agent is not None
