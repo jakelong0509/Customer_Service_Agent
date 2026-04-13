@@ -42,7 +42,9 @@ async def test_rxnorm_mapping_agent():
     """Test RxNorm mapping agent functionality."""
     init_milvus()
     await asyncio.wait_for(init_pool(), timeout=10.0)
+    print(f"Database initialized: {get_pool()}")
     create_agent()
+    print(f"Database initialized: {get_pool()}")
     agent = get_agent("rxnorm_mapping_agent_email")
     assert agent is not None
     
