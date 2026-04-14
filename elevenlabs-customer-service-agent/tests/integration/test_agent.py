@@ -43,6 +43,7 @@ async def test_rxnorm_mapping_agent():
     init_milvus()
     await asyncio.wait_for(init_pool(), timeout=10.0)
     print(f"Database initialized: {get_pool()}")
+    customer = await  asyncio.wait_for(CustomerDA().get_customer_by_email_address("jakelong0509@gmail.com"), timeout=10.0)
     create_agent()
     print(f"Database initialized: {get_pool()}")
     agent = get_agent("rxnorm_mapping_agent_email")
@@ -85,7 +86,7 @@ async def test_rxnorm_mapping_agent():
         agent_name="rxnorm_mapping_agent_email",
         request=_MESSY_CLINICAL_NOTE,
     )
-    customer = await  asyncio.wait_for(CustomerDA().get_customer_by_email_address("jakelong0509@gmail.com"), timeout=10.0)
+    
     response = await asyncio.wait_for(agent.arun(request, customer, "test-session-id-3"), timeout=10.0)
     assert response is not None
 
