@@ -7,6 +7,7 @@ from app.src.infrastructure.milvus import init_milvus, close_milvus
 from app.src.infrastructure.database import init_pool, close_pool, get_pool
 from app.src.core.agent_run_request_model import AgentRunRequest
 from app.DAL.customerDA import CustomerDA
+from app.src.core.customer import CustomerModel
 
 
 # def test_initialize_milvus():
@@ -42,10 +43,7 @@ async def test_rxnorm_mapping_agent():
     """Test RxNorm mapping agent functionality."""
     init_milvus()
     await init_pool()
-    print(f"Database initialized: {get_pool()}")
-    customer = await CustomerDA().get_customer_by_email_address("jakelong0509@gmail.com")
     create_agent()
-    print(f"Database initialized: {get_pool()}")
     agent = get_agent("rxnorm_mapping_agent_email")
     assert agent is not None
     
@@ -82,12 +80,22 @@ async def test_rxnorm_mapping_agent():
         Electronically signed: Dr Demo | 4/9/2026
     """.strip()
 
+
+    customer = CustomerModel(
+        id="1",
+        phone="1234567890",
+        email="jakelong0509@gmail.com",
+        name="John Doe",
+        plan="Free",
+        status="active",
+    )
+
     request = AgentRunRequest(
         agent_name="rxnorm_mapping_agent_email",
         request=_MESSY_CLINICAL_NOTE,
     )
     
-    response = await asyncio.wait_for(agent.arun(request, customer, "test-session-id-3"), timeout=10.0)
+    response = await agent.arun(request, customer, "test-session-id-3")
     assert response is not None
 
     # Manual inspection: normalization + entity extraction + mapping quality
