@@ -41,9 +41,9 @@ from app.DAL.customerDA import CustomerDA
 async def test_rxnorm_mapping_agent():
     """Test RxNorm mapping agent functionality."""
     init_milvus()
-    await asyncio.wait_for(init_pool(), timeout=10.0)
+    await init_pool()
     print(f"Database initialized: {get_pool()}")
-    customer = await  asyncio.wait_for(CustomerDA().get_customer_by_email_address("jakelong0509@gmail.com"), timeout=10.0)
+    customer = await CustomerDA().get_customer_by_email_address("jakelong0509@gmail.com")
     create_agent()
     print(f"Database initialized: {get_pool()}")
     agent = get_agent("rxnorm_mapping_agent_email")
