@@ -67,6 +67,7 @@ class AgentFactory(AgentBase):
     try:
       self.store.setup()
     except BaseException:
+      print(f"Error setting up store: {sys.exc_info()}")
       self._store_cm.__exit__(*sys.exc_info())
       raise
 
