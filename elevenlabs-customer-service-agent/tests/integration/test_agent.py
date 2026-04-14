@@ -2,12 +2,12 @@ import asyncio
 import os
 import pytest
 
-from app.src.services.agent_registry import create_agent, AGENTS, get_agent
-from app.src.infrastructure.milvus import init_milvus, close_milvus
-from app.src.infrastructure.database import init_pool, close_pool, get_pool
-from app.src.core.agent_run_request_model import AgentRunRequest
-from app.DAL.customerDA import CustomerDA
-from app.src.core.customer import CustomerModel
+from src.services.agent_registry import create_agent, AGENTS, get_agent
+from src.infrastructure.milvus import init_milvus, close_milvus
+from src.infrastructure.database import init_pool, close_pool, get_pool
+from src.core.agent_run_request_model import AgentRunRequest
+from DAL.customerDA import CustomerDA
+from src.core.customer import CustomerModel
 
 
 # def test_initialize_milvus():
@@ -88,7 +88,7 @@ async def test_rxnorm_mapping_agent():
         name="John Doe",
         plan="Free",
         status="active",
-    ).model_dump()
+    )
 
     request = AgentRunRequest(
         agent_name="rxnorm_mapping_agent_email",
