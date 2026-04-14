@@ -1,10 +1,10 @@
-# DB connection — async Postgres client via asyncpg
-from contextlib import asynccontextmanager
+# DB connection — async Postgres client via asyncpgifrom contextlib import asynccontextmanager
 from typing import AsyncGenerator
 
 import asyncpg
 
 from src.core.config import get_settings
+from contextlib import asynccontextmanager
 
 _pool: asyncpg.Pool | None = None
 
@@ -24,8 +24,6 @@ async def init_pool() -> asyncpg.Pool:
 
 def get_pool() -> asyncpg.Pool:
     """Return the current pool. Raises if pool not initialized."""
-    print(f"Database pool: {_pool}")
-    global _pool
     if _pool is None:
         raise RuntimeError("Database pool not initialized. Call init_pool() at startup.")
     return _pool
@@ -37,7 +35,6 @@ async def close_pool() -> None:
     if _pool is not None:
         await _pool.close()
         _pool = None
-
 
 @asynccontextmanager
 async def get_connection() -> AsyncGenerator[asyncpg.Connection, None]:

@@ -1,8 +1,20 @@
+import sys
 from pymilvus import MilvusClient
 from src.core.config import get_settings
 
 # singleton pattern
 _client: MilvusClient | None = None
+
+
+def _canonical_module():
+    """Return the canonical module object (src.infrastructure.milvus).
+
+    Prevents double-import divergence when both ``src.infrastructure.milvus``
+    and ``app.src.infrastructure.milvus`` are loaded due to overlapping
+    PYTHONPATH entries.
+    """
+    return sys.modules.get("src.infrastructure.milvus", sys.modules.get("app.src.infrastructure.milvus"))
+
 
 def init_milvus(timeout: float = 30.0) -> MilvusClient | None:
     """Initialize Milvus/Zilliz Cloud client.
@@ -32,6 +44,10 @@ def init_milvus(timeout: float = 30.0) -> MilvusClient | None:
             timeout=timeout,
         )
         print(f"Milvus client initialized: {_client}")
+        # Ensure the canonical module also sees the client
+        mod = _canonical_module()
+        if mod is not None and mod is not sys.modules[__name__]:
+            mod.__dict__["_client"] = _client
         return _client
     except Exception as e:
         print(f"ERROR: Failed to initialize Milvus: {e}")
@@ -39,14 +55,25 @@ def init_milvus(timeout: float = 30.0) -> MilvusClient | None:
         traceback.print_exc()
         raise RuntimeError(f"Milvus initialization failed: {e}") from e
 
+
 def get_milvus() -> MilvusClient:
-  if _client is None:
-    raise RuntimeError("Milvus client is not initialized. Call init_milvus() at startup.")
-  return _client
+    global _client
+    # Check canonical module's client if ours is None
+    if _client is None:
+        mod = _canonical_module()
+        if mod is not None and mod is not sys.modules[__name__]:
+            _client = mod.__dict__.get("_client")
+    if _client is None:
+        raise RuntimeError("Milvus client is not initialized. Call init_milvus() at startup.")
+    return _client
+
 
 def close_milvus() -> None:
-  global _client
-  if _client is not None:
-    _client.close()
-    _client = None
-
+    global _client
+    if _client is not None:
+        _client.close()
+        _client = None
+    # Also clear the canonical module
+    mod = _canonical_module()
+    if mod is not None and mod is not sys.modules[__name__]:
+        mod.__dict__["_client"] = None
