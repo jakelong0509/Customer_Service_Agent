@@ -88,7 +88,7 @@ async def test_rxnorm_mapping_agent():
         name="John Doe",
         plan="Free",
         status="active",
-    )
+    ).model_dump()
 
     request = AgentRunRequest(
         agent_name="rxnorm_mapping_agent_email",
