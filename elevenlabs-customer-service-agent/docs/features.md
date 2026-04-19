@@ -3,9 +3,9 @@
 This document outlines the key features and capabilities that are highly valued when seeking roles in Agentic AI, LLM-powered applications, and conversational AI systems.
 
 **Legend:**
-- ✅ **Implemented** - Feature is fully working in this project
-- 🔄 **Partial** - Feature exists but needs enhancement
-- ❌ **Not Implemented** - Feature not yet built
+- ✅ **Implemented**: Feature is fully working in this project
+- 🔄 **Partial**: Feature exists but needs enhancement
+- ❌ **Not Implemented**: Feature not yet built
 
 ---
 
@@ -174,7 +174,7 @@ This document outlines the key features and capabilities that are highly valued 
 
 ## 9. 🔄 Observability & Monitoring
 
-**Status**: Partial - basic logging exists
+**Status**: Partial, basic logging exists
 
 **Implemented**:
 - ✅ Basic logging with print statements
@@ -192,7 +192,7 @@ This document outlines the key features and capabilities that are highly valued 
 
 ## 10. 🔄 Testing & Evaluation
 
-**Status**: Partial - CI pipeline with tests implemented
+**Status**: Partial, CI pipeline with tests implemented
 
 **Implemented**:
 - ✅ Integration tests for agents (`tests/integration/test_agent.py`)
@@ -216,7 +216,7 @@ This document outlines the key features and capabilities that are highly valued 
 
 ## 11. 🔄 Deployment & Scaling
 
-**Status**: Partial - CI completed with Docker Compose, CD pending
+**Status**: Partial, CI completed with Docker Compose, CD pending
 
 **Implemented**:
 - ✅ Environment-based configuration (.env)
@@ -227,7 +227,7 @@ This document outlines the key features and capabilities that are highly valued 
 - ✅ Automated testing on push/PR
 
 **Not Implemented**:
-- ❌ CD pipeline (deployment automation) - *planned for later*
+- ❌ CD pipeline (deployment automation): *planned for later*
 - ❌ Kubernetes manifests
 - ❌ Auto-scaling configuration
 - ❌ Load balancing setup
@@ -262,7 +262,7 @@ This document outlines the key features and capabilities that are highly valued 
 
 **Status**: Not implemented (foundations exist: email skill, `tool_logs`, conversation memory)
 
-**Purpose**: Reduce post-call manual work by turning the conversation into a **structured handoff**—what was promised, callback reason, issues in order, and next steps—so staff do not re-type the same information.
+**Purpose**: Reduce post-call manual work by turning the conversation into a **structured handoff**: what was promised, callback reason, issues in order, and next steps, so staff do not re-type the same information.
 
 **Planned**:
 - ❌ Trigger on call end or on-demand (e.g. dedicated tool / webhook)
@@ -285,7 +285,7 @@ This document outlines the key features and capabilities that are highly valued 
 
 **Status**: Not implemented (**depends on RAG**, see section 4)
 
-**Purpose**: Assist with high-friction forms (insurance, employer, clinic intake, internal requests) by **retrieving** grounded snippets from approved documents, **drafting** field values from chart or call context, and **flagging** low-confidence items for **human sign-off**—not unsupervised auto-submit.
+**Purpose**: Assist with high-friction forms (insurance, employer, clinic intake, internal requests) by **retrieving** grounded snippets from approved documents, **drafting** field values from chart or call context, and **flagging** low-confidence items for **human sign-off**, not unsupervised auto-submit.
 
 **Planned**:
 - ❌ **Retrieve** relevant policy / clinic rules / field definitions from the vector store (same pipeline as section 4)

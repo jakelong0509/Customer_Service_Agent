@@ -7,9 +7,9 @@
 **Key Capabilities:**
 - **ElevenLabs:** resolve or create customer by phone → run or end agent (`invoke_agent` → registered agent `arun`)
 - **SendGrid:** `POST /api/sendgrid/inbound` (multipart); heavy agent work should move to **RabbitMQ workers** (today may use **FastAPI `BackgroundTasks`** as a bridge)
-- Customer and **scheduling** data in PostgreSQL (`customers`, `provider_names` / `providers`, `slot_templates`, `appointments`, `appointment_resource_bookings`, `general_statuses`, `callback_requests`, plus clinical/RxNorm tables — see `docs/database.md`)
+- Customer and **scheduling** data in PostgreSQL (`customers`, `provider_names` / `providers`, `slot_templates`, `appointments`, `appointment_resource_bookings`, `general_statuses`, `callback_requests`, plus clinical/RxNorm tables, see `docs/database.md`)
 - **Redis** client (`src/infrastructure/redis.py`) for call/session keys; full “active call” flows may evolve with product
-- **Milvus / Zilliz:** vector collections (e.g. RXNCONSO in Milvus; relational RxNorm tables in Postgres) — ingestion scripts live under `app/init_milvus.py` and `RAG_service`
+- **Milvus / Zilliz:** vector collections (e.g. RXNCONSO in Milvus; relational RxNorm tables in Postgres); ingestion scripts live under `app/init_milvus.py` and `RAG_service`
 - **RabbitMQ (target):** message broker for **heavy, asynchronous work** decoupled from the HTTP layer
 
 ---
@@ -25,7 +25,7 @@
               └──────────────────┬───────────────┘
                                  ▼
 ┌────────────────────────────────────────────────────────────────┐
-│  FastAPI — app/main.py                                         │
+│  FastAPI - app/main.py                                         │
 │  Routers: app/controllers/routes.py                            │
 │           app/controllers/elevenlabs_controller.py             │
 │           app/controllers/sendgrid.py                          │
@@ -115,7 +115,7 @@ There is **no** `tool_logs` or `documents` table in the current `create_tables.s
 
 #### Redis (session / call-scoped state)
 
-**Implementation:** `src/infrastructure/redis.py` — async client, initialized in `main.py` lifespan. Helpers such as `get_call_state` / `set_call_state` support **per-`call_sid`** keys with TTL.
+**Implementation:** `src/infrastructure/redis.py`, async client, initialized in `main.py` lifespan. Helpers such as `get_call_state` / `set_call_state` support **per-`call_sid`** keys with TTL.
 
 **Intended use:** fast ephemeral state during voice or multi-step flows (conversation/thread hints, lightweight caches). Customer-of-record remains **PostgreSQL**.
 
@@ -148,13 +148,13 @@ HTTP 200 (acknowledge webhook quickly)
 Worker process ── consume message ──▶ run agent / tools ──▶ ack or nack
 ```
 
-**Implementation options:** **Celery** with RabbitMQ as broker, **Kombu**, **aio-pika** / **pika**, or another AMQP client—broker choice is **RabbitMQ**; worker code lives in **separate processes** from `uvicorn`.
+**Implementation options:** **Celery** with RabbitMQ as broker, **Kombu**, **aio-pika** / **pika**, or another AMQP client-broker choice is **RabbitMQ**; worker code lives in **separate processes** from `uvicorn`.
 
 **Note:** Until workers are deployed, the app may still use **FastAPI `BackgroundTasks`** as a stepping stone; production-scale, multi-replica setups should **publish to RabbitMQ** instead of relying on in-process background tasks alone.
 
-#### Milvus (vector database — Zilliz Cloud compatible)
+#### Milvus (vector database, Zilliz Cloud compatible)
 
-**Client:** `src/infrastructure/milvus.py` — `MilvusClient`, `init_milvus()` at startup. Configure with **`MILVUS_CLUSTER_ENDPOINT`** (include **`:443`** for Zilliz HTTPS URLs) and **`MILVUS_COLLECTION_TOKEN`**. If unset, `init_milvus()` skips connection (skills that need Milvus will require it).
+**Client:** `src/infrastructure/milvus.py`: `MilvusClient`, `init_milvus()` at startup. Configure with **`MILVUS_CLUSTER_ENDPOINT`** (include **`:443`** for Zilliz HTTPS URLs) and **`MILVUS_COLLECTION_TOKEN`**. If unset, `init_milvus()` skips connection (skills that need Milvus will require it).
 
 **RAG in this repo:** `src/services/RAG_service.py` embeds text (e.g. HuggingFace / PubMedBERT-style models in ingestion scripts), ingests **RRF** / structured files into collections, and runs **hybrid / semantic search** used from skill code (notably **RxNorm** flows in `rxnorm_mapping_skill`).
 
@@ -190,9 +190,9 @@ RxNorm RRF / exports → ingest_local / DB ingest (init_milvus.py, db_service)
 | `security_agent` | Security / verification (`SecurityAgentState`) |
 | `rxnorm_mapping_agent_email` | Email; text normalize → clinical entities → RxNorm + Milvus |
 
-**Shared tools (memory / skills):** `activate_skill`, `deactivate_skill`, `retrieve_conversation_history`, `store_conversation_history`, `store_session_outcome`, `find_similar_sessions` — see `src/agents/shared_tools/`.
+**Shared tools (memory / skills):** `activate_skill`, `deactivate_skill`, `retrieve_conversation_history`, `store_conversation_history`, `store_session_outcome`, `find_similar_sessions`; see `src/agents/shared_tools/`.
 
-**Skills:** `app/src/skills/*/` — each has `SKILL.md` and `scripts/tools.py` (e.g. `appointment_booking_skill`, `email_skill`, `text_normalize_skill`, `clinical_entity_extraction_skill`, `rxnorm_mapping_skill`).
+**Skills:** `app/src/skills/*/`: each has `SKILL.md` and `scripts/tools.py` (e.g. `appointment_booking_skill`, `email_skill`, `text_normalize_skill`, `clinical_entity_extraction_skill`, `rxnorm_mapping_skill`).
 
 ---
 
@@ -269,7 +269,7 @@ ElevenLabs                    Our API
 Future hardening often adds a **`documents`** (or similar) table with **tenant / company id**, **object-store path**, and **access level**, and restricts Milvus metadata queries accordingly. **That table is not in the current `create_tables.sql`.** Implement when you add user-visible document upload and multi-tenant RAG.
 
 ### Authentication
-- **ElevenLabs / SendGrid** webhooks should be **locked down** in production (e.g. verify SendGrid signatures, IP allowlists, secrets for internal routes) — tighten per your threat model
+- **ElevenLabs / SendGrid** webhooks should be **locked down** in production (e.g. verify SendGrid signatures, IP allowlists, secrets for internal routes), tighten per your threat model
 - **Rate limiting** on public endpoints as traffic grows
 
 ---
@@ -373,7 +373,7 @@ app/
 ## Environment variables (aligned with `src/core/config.py`)
 
 ```bash
-# PostgreSQL — asyncpg URL (either name works in Settings)
+# PostgreSQL: asyncpg URL (either name works in Settings)
 DATABASE_URL=postgresql://user:pass@localhost:5432/customer_service
 POSTGRES_CONNECTION_STRING=postgresql://user:pass@localhost:5432/customer_service
 
@@ -383,7 +383,7 @@ REDIS_PORT=6379
 REDIS_USERNAME=optional
 REDIS_PASSWORD=optional
 
-# Milvus / Zilliz — public endpoint, include :443 for HTTPS serverless
+# Milvus / Zilliz: public endpoint, include :443 for HTTPS serverless
 MILVUS_CLUSTER_ENDPOINT=https://in03-xxxxx.cloud.zilliz.com:443
 MILVUS_COLLECTION_TOKEN=your_zilliz_token_or_user_password
 

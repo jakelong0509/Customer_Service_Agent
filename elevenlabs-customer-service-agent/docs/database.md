@@ -2,7 +2,7 @@
 
 Schema for the tool API: **customers**, **provider_names** (Doctor, Nurse, Room, Equipment), **providers** (bookable resources), **slot_templates** (fixed 30-minute grid with lunch omitted), **general_statuses** (pending, scheduled, completed, cancelled), **appointments**, **callback_requests**, **appointment_resource_bookings** (per-resource reservations to prevent double booking), plus **RAG/clinical** tables (**clinical_note_embeddings**, **umls_concepts**, **rxnorm_***, **drug_interactions**). Postgres, managed via asyncpg.
 
-RXNCONSO lives in Milvus (Zilliz), not PostgreSQL — see `docs/RAG.md`.
+RXNCONSO lives in Milvus (Zilliz), not PostgreSQL. See `docs/RAG.md`.
 
 ---
 
@@ -143,7 +143,7 @@ customers
 | status           | INTEGER      | no       | FK → `general_statuses.id` |
 | created_at       | TIMESTAMPTZ  | no       | Default now()              |
 
-- **Unique** `(provider_id, booking_date, slot_template_id)` — prevents double booking per resource.
+- **Unique** `(provider_id, booking_date, slot_template_id)`: prevents double booking per resource.
 - Indexes for availability lookups and by `appointment_id`.
 
 ---
@@ -216,7 +216,7 @@ Abbreviation / reference lookup: `key_val`, `value_val`, `type_val`, `expl`. Pri
 
 ## SQL (create tables)
 
-Script file: **`app/init_db/create_tables.sql`** — run with `psql $DATABASE_URL -f app/init_db/create_tables.sql` or paste the block below.
+Script file: **`app/init_db/create_tables.sql`**; run with `psql $DATABASE_URL -f app/init_db/create_tables.sql` or paste the block below.
 
 ```sql
 -- Create tables for Customer Service Agent (see docs/database.md)
@@ -317,7 +317,7 @@ CREATE INDEX idx_appointment_resource_bookings_appointment
 -- ============================================================================
 -- RAG / Clinical Tables
 -- See docs/RAG.md for full architecture.
--- RXNCONSO is stored entirely in Milvus (Zilliz) — NOT in PostgreSQL.
+-- RXNCONSO is stored entirely in Milvus (Zilliz): NOT in PostgreSQL.
 -- The following tables are PostgreSQL-only (no vectors, pure relational).
 -- ============================================================================
 

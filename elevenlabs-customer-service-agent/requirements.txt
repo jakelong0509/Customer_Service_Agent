@@ -41,3 +41,7 @@ sendgrid>=6.11.0
 protobuf
 grpcio-tools
 pymilvus>=2.5.0
+
+# RabbitMQ
+pika
+aio-pika

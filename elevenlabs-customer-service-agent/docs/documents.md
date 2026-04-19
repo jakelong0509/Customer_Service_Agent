@@ -12,7 +12,7 @@ This page lists **where documentation lives** in the ElevenLabs Customer Service
 
 ---
 
-## `docs/` — project documentation
+## `docs/`: project documentation
 
 | File | Purpose |
 |------|---------|
@@ -32,7 +32,7 @@ This page lists **where documentation lives** in the ElevenLabs Customer Service
 
 ---
 
-## Application code — authored docs (not in `docs/`)
+## Application code: authored docs (not in `docs/`)
 
 These files travel with the code they describe; loaders often use them at runtime.
 
@@ -40,7 +40,7 @@ These files travel with the code they describe; loaders often use them at runtim
 |----------|---------|
 | `app/agent_configs.json` | Agent definitions, models, skills, and routing metadata for the factory/registry. |
 | `app/src/agents/*/system_prompt.md` | System prompts for **customer_support_agent**, **security_agent**, **rxnorm_mapping_agent** (placeholders documented in each file). |
-| `app/src/skills/*/SKILL.md` | Skill contracts: **appointment_booking**, **clinical_entity_extraction**, **email**, **rxnorm_mapping**, **text_normalize** — when to use, workflows, tool names. |
+| `app/src/skills/*/SKILL.md` | Skill contracts: **appointment_booking**, **clinical_entity_extraction**, **email**, **rxnorm_mapping**, **text_normalize**, when to use, workflows, tool names. |
 
 ---
 

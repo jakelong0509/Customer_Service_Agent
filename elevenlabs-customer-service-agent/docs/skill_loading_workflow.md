@@ -11,8 +11,8 @@ Skills are discovered from the filesystem at runtime:
 **Location:** `app/src/skills/<skill_name>/SKILL.md`
 
 Each skill is a folder containing:
-- `SKILL.md` - YAML frontmatter + markdown body (required)
-- `tools.py` - Skill-specific tools (optional, loaded dynamically)
+- `SKILL.md`: YAML frontmatter + markdown body (required)
+- `tools.py`: Skill-specific tools (optional, loaded dynamically)
 
 ### SKILL.md Format
 
@@ -30,9 +30,9 @@ Procedural guidance for the agent when this skill is active...
 ```
 
 **Frontmatter fields:**
-- `name` - Unique skill identifier (used for activation/lookup)
-- `description` - Short description shown in available skills list (Layer A)
-- `isolation` - Optional flag (`fork` or `true`) for isolated execution mode
+- `name`: Unique skill identifier (used for activation/lookup)
+- `description`: Short description shown in available skills list (Layer A)
+- `isolation`: Optional flag (`fork` or `true`) for isolated execution mode
 
 **Body content:**
 - Full procedural guidance (Layer B) injected when skill is active
@@ -55,21 +55,21 @@ skill_tools = get_skill_tools(["appointment_booking_skill"])
 ```
 
 **`SkillRecord` fields:**
-- `name` - Skill name from frontmatter
-- `description` - Short description from frontmatter (Layer A)
-- `body` - Full markdown body without frontmatter (Layer B)
-- `isolation_fork` - Boolean from frontmatter `isolation` flag
-- `active` - Runtime flag indicating if skill is currently active
+- `name`: Skill name from frontmatter
+- `description`: Short description from frontmatter (Layer A)
+- `body`: Full markdown body without frontmatter (Layer B)
+- `isolation_fork`: Boolean from frontmatter `isolation` flag
+- `active`: Runtime flag indicating if skill is currently active
 
 ---
 
 ## 3. Three-Layer Disclosure Model
 
-### Layer A — Registry (Always in Context)
+### Layer A: Registry (Always in Context)
 
 **Content:** For all configured skills, the system prompt includes:
-- **name** - Skill identifier
-- **description** - Brief description of when to use the skill
+- **name**: Skill identifier
+- **description**: Brief description of when to use the skill
 
 **In system prompt:**
 ```
@@ -79,7 +79,7 @@ skill_tools = get_skill_tools(["appointment_booking_skill"])
 
 **Purpose:** The model knows what skills are available and when they apply without loading full skill documentation.
 
-### Layer B — Skill Body (When Active)
+### Layer B: Skill Body (When Active)
 
 **Content:** Full procedural guidance from `SKILL.md` body (below frontmatter).
 
@@ -93,7 +93,7 @@ skill_tools = get_skill_tools(["appointment_booking_skill"])
 Guidance for the agent when handling appointment scheduling...
 ```
 
-### Layer C — Resources (Tools)
+### Layer C: Resources (Tools)
 
 **Content:** Skill-specific tools loaded dynamically from `app/src/skills/<skill_name>/tools.py`.
 

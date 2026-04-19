@@ -2,30 +2,20 @@
 import logging
 import json
 import re
-from typing import Optional
+import pika
+from typing import Optional, Any
 
 from fastapi import APIRouter, BackgroundTasks, Form
 
 from src.services.dispatch_agent import invoke_agent
 from src.core.agent_run_request_model import SendGridInboundRequest
+from src.services.rabbitmq_service import RabbitMQService
 from fastapi.responses import Response
 from src.core.customer import CustomerModel
 from DAL.customerDA import CustomerDA
 
 router = APIRouter(prefix="/api/sendgrid", tags=["api"])
 logger = logging.getLogger(__name__)
-
-
-async def _run_inbound_agent(
-    agent_name: str,
-    agent_request: SendGridInboundRequest,
-    customer: CustomerModel | None,
-    session_id: str,
-) -> None:
-    try:
-        await invoke_agent(agent_name, agent_request, customer, session_id)
-    except Exception:
-        logger.exception("SendGrid inbound background agent failed (agent=%s)", agent_name)
 
 
 def extract_message_id(headers: str | None) -> str | None:
@@ -134,14 +124,8 @@ async def sendgrid_inbound(
             )
 
         if agent_request is not None:
-            session_id = message_id or ""
-            background_tasks.add_task(
-                _run_inbound_agent,
-                agent_request.agent_name,
-                agent_request,
-                customer,
-                session_id,
-            )
+            # Send message to RabbitMQ
+            RabbitMQService.asend_message(agent_request)
 
         return Response(status_code=200)
         

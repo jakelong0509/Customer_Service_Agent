@@ -81,7 +81,7 @@ RAG Results:
 2. Viral meningitis (CUI: C0085438) - 10% match
 3. Subarachnoid hemorrhage (CUI: C0038525) - 5% match
 
-Alert: High-confidence match for meningitis - recommend lumbar puncture
+Alert: High-confidence match for meningitis, recommend lumbar puncture
 ```
 
 ### Data Sources
@@ -125,7 +125,7 @@ Interaction Search:
 - Mechanism: CYP3A4 inhibition
 - Recommendation: Consider azithromycin alternative
 
-Alert Level: CRITICAL - Requires physician review before dispensing
+Alert Level: CRITICAL, Requires physician review before dispensing
 ```
 
 ### Data Sources
@@ -244,12 +244,12 @@ Required Elements:
 
 ### From `D:\Medical_terms_codes`:
 - [ ] UMLS Metathesaurus (MRCONSO, MRSTY, MRREL)
-- [ ] RxNORM — Full table set:
-  - [ ] RXNCONSO (Milvus/Zilliz only — all columns as scalar fields + STR embedded as vector)
-  - [ ] RXNREL (PostgreSQL — concept relationships)
-  - [ ] RXNSAT (PostgreSQL — attributes, NDC codes)
-  - [ ] RXNSTY (PostgreSQL — semantic type classification)
-  - [ ] RXNDOC (PostgreSQL — abbreviation/reference lookup)
+- [ ] RxNORM: Full table set:
+  - [ ] RXNCONSO (Milvus/Zilliz only: all columns as scalar fields + STR embedded as vector)
+  - [ ] RXNREL (PostgreSQL: concept relationships)
+  - [ ] RXNSAT (PostgreSQL: attributes, NDC codes)
+  - [ ] RXNSTY (PostgreSQL: semantic type classification)
+  - [ ] RXNDOC (PostgreSQL: abbreviation/reference lookup)
 - [ ] ICD-10-CM codes and descriptions
 - [ ] CPT codes (if available)
 - [ ] SNOMED CT (if available separate from UMLS)
@@ -315,49 +315,49 @@ The split between relational and vector storage depends on access patterns:
 | **Relational DB (SQL)** | Exact lookups, joins, filtering, referential integrity, structured queries |
 | **Vector DB** | Semantic/similarity search on natural language text fields |
 
-#### RXNCONSO — Milvus (Zilliz) Only
+#### RXNCONSO: Milvus (Zilliz) Only
 
-The most important table — stored **entirely in Milvus** with all columns as scalar fields. Not duplicated in PostgreSQL.
+The most important table: stored **entirely in Milvus** with all columns as scalar fields. Not duplicated in PostgreSQL.
 
 | Storage | Columns | Rationale |
 |---|---|---|
-| **Milvus (Zilliz)** | `id` (INT64, auto_id PK) + all 18 RXNCONSO columns as scalar fields + `vector` (FLOAT_VECTOR from STR) | `STR` is the only free-text field — embedded as vector. All other columns stored as scalar fields for filtering and direct retrieval. Simple drug lookups never touch PostgreSQL. |
+| **Milvus (Zilliz)** | `id` (INT64, auto_id PK) + all 18 RXNCONSO columns as scalar fields + `vector` (FLOAT_VECTOR from STR) | `STR` is the only free-text field, embedded as vector. All other columns stored as scalar fields for filtering and direct retrieval. Simple drug lookups never touch PostgreSQL. |
 
 **Typical query flows:**
 ```
-Simple lookup — Milvus only:
+Simple lookup: Milvus only:
 User asks: "What is Lipitor 20mg?"
   → Milvus semantic search with filter='sab=="RXNORM" and tty in ["SCD","SBD"]'
-  → Returns rxcui, str, tty, sab, code directly — no PostgreSQL needed
+  → Returns rxcui, str, tty, sab, code directly, no PostgreSQL needed
 
-Generic equivalent — Milvus → PostgreSQL:
+Generic equivalent: Milvus → PostgreSQL:
 User asks: "What's the generic for Lipitor?"
   → Milvus semantic search → returns rxcui = 617311
   → PostgreSQL: RXNREL query on rxcui1 = '617311', rela = 'tradename_of'
   → Returns: rxcui = 1000003 (Atorvastatin)
 ```
 
-#### RXNREL — Relational DB Only
+#### RXNREL: Relational DB Only
 
 | Storage | Columns | Rationale |
 |---|---|---|
-| **Relational DB** | `RXCUI1, RXAUI1, STYPE1, REL, RXCUI2, RXAUI2, STYPE2, RELA, RUI, SRUI, SAB, SL, RG, DIR, SUPPRESS, CVF` | Purely graph/relational data — traversing "ingredient_of", "has_form", "dose_form_of" relationships. No free-text to embed. Joins on RXCUI1/RXCUI2. |
+| **Relational DB** | `RXCUI1, RXAUI1, STYPE1, REL, RXCUI2, RXAUI2, STYPE2, RELA, RUI, SRUI, SAB, SL, RG, DIR, SUPPRESS, CVF` | Purely graph/relational data: traversing "ingredient_of", "has_form", "dose_form_of" relationships. No free-text to embed. Joins on RXCUI1/RXCUI2. |
 
 > **Tip**: If relationship traversal is heavy, consider also storing this in a graph DB (Neo4j) where `(RXCUI1)-[REL:RELA]->(RXCUI2)` maps naturally to nodes and edges.
 
-#### RXNSAT — Relational DB Only
+#### RXNSAT: Relational DB Only
 
 | Storage | Columns | Rationale |
 |---|---|---|
-| **Relational DB** | `RXCUI, LUI, SUI, RXAUI, STYPE, CODE, ATUI, SATUI, ATN, SAB, ATV, SUPPRESS, CVF` | Structured attribute lookups — e.g., "get NDC code (ATN='NDC') for RXCUI=xxx". ATV values are mostly codes/abbreviations, not natural language. Joins via RXCUI/RXAUI. |
+| **Relational DB** | `RXCUI, LUI, SUI, RXAUI, STYPE, CODE, ATUI, SATUI, ATN, SAB, ATV, SUPPRESS, CVF` | Structured attribute lookups, e.g., "get NDC code (ATN='NDC') for RXCUI=xxx". ATV values are mostly codes/abbreviations, not natural language. Joins via RXCUI/RXAUI. |
 
-#### RXNSTY — Relational DB Only
+#### RXNSTY: Relational DB Only
 
 | Storage | Columns | Rationale |
 |---|---|---|
 | **Relational DB** | `RXCUI, TUI, STN, STY, ATUI, CVF` | Tiny classification table. Used for filtering (e.g., "only return results with STY='Pharmacologic Substance'"). Pure lookup, no semantic search needed. |
 
-#### RXNDOC — Relational DB Only
+#### RXNDOC: Relational DB Only
 
 | Storage | Columns | Rationale |
 |---|---|---|
@@ -369,11 +369,11 @@ User asks: "What's the generic for Lipitor?"
 ┌─────────────────────────────────────────────────────────────────┐
 │                    Milvus / Zilliz (Vector DB)                   │
 │                                                                 │
-│  Collection: rxnorm_concepts (RXNCONSO — full table)            │
+│  Collection: rxnorm_concepts (RXNCONSO, full table)            │
 │    id (INT64, auto_id, PK)                                      │
 │    rxcui, rxaui, lui, sui, sab, tty, code, str, lat, ts,       │
 │    stt, ispref, saui, scui, sdui, srl, suppress, cvf           │
-│    vector (FLOAT_VECTOR, dim=1536) — embedded STR field         │
+│    vector (FLOAT_VECTOR, dim=1536) - embedded STR field         │
 │                                                                 │
 │  Collection: umls_vectors                                       │
 │    cui (VARCHAR, PK) + vector (FLOAT_VECTOR)                    │
@@ -389,10 +389,10 @@ User asks: "What's the generic for Lipitor?"
 ┌─────────────────────────────────────────────────────────────────┐
 │                    Relational DB (PostgreSQL)                    │
 │                                                                 │
-│  RXNREL  (concept relationships) — brand↔generic, ingredient   │
-│  RXNSAT  (attributes, NDC codes) — billing lookups              │
-│  RXNSTY  (semantic types) — drug classification                 │
-│  RXNDOC  (abbreviation lookup) — decode SAB, TTY, etc.         │
+│  RXNREL  (concept relationships) - brand↔generic, ingredient   │
+│  RXNSAT  (attributes, NDC codes) - billing lookups              │
+│  RXNSTY  (semantic types) - drug classification                 │
+│  RXNDOC  (abbreviation lookup) - decode SAB, TTY, etc.         │
 │                                                                 │
 │  umls_concepts, clinical_note_embeddings (no vectors)           │
 │  drug_interactions                                              │
@@ -403,12 +403,12 @@ User asks: "What's the generic for Lipitor?"
 
 | Decision | Recommendation |
 |---|---|
-| RXNCONSO storage | **Milvus (Zilliz) only** — full table with all 18 columns as scalar fields + STR embedded as vector. Not stored in PostgreSQL. |
-| PK strategy | `auto_id=True` (INT64) — Milvus generates PK. `rxcui` stored as regular scalar column for joining to PostgreSQL tables. |
-| Only text to embed? | `RXNCONSO.STR` — the only column with natural language suitable for semantic search |
-| Primary join key | `RXCUI` — links Milvus results to RXNREL ↔ RXNSAT ↔ RXNSTY in PostgreSQL |
-| Pre-filtering in Milvus | `SAB, TTY` stored as scalar fields with indexes — filter before search (e.g., `sab=="RXNORM" and tty in ["SCD","SBD"]`) |
-| Other RxNorm tables | **PostgreSQL only** — RXNREL, RXNSAT, RXNSTY, RXNDOC have no text to embed |
+| RXNCONSO storage | **Milvus (Zilliz) only**: full table with all 18 columns as scalar fields + STR embedded as vector. Not stored in PostgreSQL. |
+| PK strategy | `auto_id=True` (INT64): Milvus generates PK. `rxcui` stored as regular scalar column for joining to PostgreSQL tables. |
+| Only text to embed? | `RXNCONSO.STR`: the only column with natural language suitable for semantic search |
+| Primary join key | `RXCUI`: links Milvus results to RXNREL ↔ RXNSAT ↔ RXNSTY in PostgreSQL |
+| Pre-filtering in Milvus | `SAB, TTY` stored as scalar fields with indexes, filter before search (e.g., `sab=="RXNORM" and tty in ["SCD","SBD"]`) |
+| Other RxNorm tables | **PostgreSQL only**: RXNREL, RXNSAT, RXNSTY, RXNDOC have no text to embed |
 | RXNREL as graph? | If the agent does multi-hop relationship traversal (ingredient → clinical drug → branded drug), a graph DB would outperform SQL for path queries |
 
 ---
@@ -454,11 +454,11 @@ app/
 ### Milvus Vector Collections (Zilliz Cloud)
 
 ```
-RXNCONSO is stored entirely in Milvus — all 18 columns as scalar fields plus the
+RXNCONSO is stored entirely in Milvus: all 18 columns as scalar fields plus the
 embedded STR vector. Simple drug lookups return all data directly from Milvus
 without touching PostgreSQL.
 
-PK strategy: auto_id (INT64) — Milvus generates the PK. rxcui is a regular scalar
+PK strategy: auto_id (INT64) - Milvus generates the PK. rxcui is a regular scalar
 column used as the join key to PostgreSQL tables (RXNREL, RXNSAT, RXNSTY).
 
 Query flows:
@@ -539,7 +539,7 @@ def create_clinical_note_collection(client: MilvusClient, collection_name: str =
     client.create_collection(collection_name=collection_name, schema=schema, index_params=index_params)
 ```
 
-### Relational DB Schema (PostgreSQL — RXNCONSO removed, stored in Milvus)
+### Relational DB Schema (PostgreSQL: RXNCONSO removed, stored in Milvus)
 
 ```sql
 -- RXNCONSO is stored entirely in Milvus (Zilliz). Not in PostgreSQL.
@@ -627,7 +627,7 @@ CREATE TABLE drug_interactions (
     mechanism TEXT
 );
 
--- Relational indexes (rxnorm_concepts NOT in PostgreSQL — lives in Milvus)
+-- Relational indexes (rxnorm_concepts NOT in PostgreSQL: lives in Milvus)
 CREATE INDEX ON rxnorm_relationships (rxcui1);
 CREATE INDEX ON rxnorm_relationships (rxcui2);
 CREATE INDEX ON rxnorm_relationships (rel);
