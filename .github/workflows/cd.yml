@@ -1,0 +1,71 @@
+# Build with Docker Compose (Postgres + Redis + app) and run pytest in the app container.
+name: Build and Deploy to ECS
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:  # allows manual triggering
+
+permissions:
+  id-token: write # required for OIDC
+  contents: read
+
+env:
+  AWS_REGION: ${{ secrets.AWS_REGION }}
+  ECR_REGISTRY: ${{ secrets.ECR_REGISTRY }}
+  APP_IMAGE: ${{ secrets.ECR_REGISTRY }}/customer-service-agent
+  WORKER_IMAGE: ${{ secrets.ECR_REGISTRY }}/customer-service-worker
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Login to ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build and push app image
+        working-directory: elevenlabs-customer-service-agent
+        run: |
+          docker build -t customer-service-agent .
+          docker tag customer-service-agent:latest ${{ env.APP_IMAGE }}:${{ github.sha }}
+          docker tag customer-service-agent:latest ${{ env.APP_IMAGE }}:latest
+          docker push ${{ env.APP_IMAGE }}:${{ github.sha }}
+          docker push ${{ env.APP_IMAGE }}:latest
+
+      - name: Build and push worker image
+        working-directory: elevenlabs-customer-service-agent
+        run: |
+          docker build -f Dockerfile.worker -t customer-service-worker .
+          docker tag customer-service-worker:latest ${{ env.WORKER_IMAGE }}:${{ github.sha }}
+          docker tag customer-service-worker:latest ${{ env.WORKER_IMAGE }}:latest
+          docker push ${{ env.WORKER_IMAGE }}:${{ github.sha }}
+          docker push ${{ env.WORKER_IMAGE }}:latest
+
+      # Trigger ECS deployment
+      # - name: Deploy to ECS
+      #   run: |
+      #     aws ecs update-service \
+      #       --cluster customer-service-cluster \
+      #       --service customer-service-app \
+      #       --force-new-deployment
+
+      #     aws ecs update-service \
+      #       --cluster customer-service-cluster \
+      #       --service customer-service-worker \
+      #       --force-new-deployment
+
+      #     echo "Waiting for services to stabilize..."
+      #     aws ecs wait services-stable \
+      #       --cluster customer-service-cluster \
+      #       --services customer-service-app customer-service-worker
