@@ -1,13 +1,6 @@
----
-name: text_normalize_skill
-description: Transform clinical abbreviations and acronyms into fully expanded, readable text while preserving original clinical meaning. Correct spelling errors and segment notes into logical sections (HPI, Assessment/Plan, Procedures, etc.)
-when_to_use: Use this skill when processing raw clinical notes that contain
-  - Medical abbreviations (HTN, DM, SOB)
-  - Dosage frequencies (BID, TID, QHS)
-  - Route abbreviations (PO, IV, IM, SC)
-  - Specialty-specific shorthand ("c/w", "p/w")
-  - Institution-specific abbreviations
----
+
+## Description
+Transform clinical abbreviations and acronyms into fully expanded, readable text while preserving original clinical meaning. Correct spelling errors and segment notes into logical sections (HPI, Assessment/Plan, Procedures, etc.)
 
 ## Core Rules
 1. **Preserve all clinical meaning** - Do not alter, reinterpret, or summarize

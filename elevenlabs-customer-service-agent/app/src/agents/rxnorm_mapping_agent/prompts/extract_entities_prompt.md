@@ -1,12 +1,11 @@
----
-name: clinical_entity_extraction_skill
-description: Extract structured clinical entities (medications, conditions, procedures) from normalized clinical text. Output conforms to the `ExtractedEntity` schema for downstream processing.
-when_to_use: Use this skill after text normalization to identify and extract
-  - **Medications** Drug names, doses, routes, frequencies
-  - **Conditions** Confirmed diagnoses and diseases
-  - **Procedures** Completed interventions and diagnostic tests
-  - **Anatomical locations** Body sites mentioned
----
+## Description
+Extract structured clinical entities (medications, conditions, procedures) from normalized clinical text. Output conforms to the `ExtractedEntity` schema for downstream processing.
+
+## Normalized Clinical Text
+```
+{normalized_text}
+```
+
 **Accuracy is paramount—hallucination of clinical information is strictly prohibited.**
 
 ## Core Rules

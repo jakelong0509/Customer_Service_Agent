@@ -28,8 +28,11 @@ from src.services.skill_registry import SkillRecord, get_skills, get_skill_tools
 from langchain.tools import InjectedState, tool
 from langgraph.types import Command
 from src.utils.sendgrid import reply_to_email
+from src.utils.logger import get_logger
 
 load_dotenv()
+
+logger = get_logger(__name__)
 
 
 class AgentFactory(AgentBase):
@@ -67,7 +70,7 @@ class AgentFactory(AgentBase):
     try:
       self.store.setup()
     except BaseException:
-      print(f"Error setting up store: {sys.exc_info()}")
+      logger.error(f"Error setting up store: {sys.exc_info()}")
       self._store_cm.__exit__(*sys.exc_info())
       raise
 
@@ -144,7 +147,9 @@ class AgentFactory(AgentBase):
   async def email_node(self, state: AgentState, runtime: Runtime[AgentRunRequest]) -> None:
     """Handle email communication. Force the agent to reply to the email."""
     try:
-      print(f"Sending email to {runtime.context.from_email} with subject {runtime.context.subject}")
+      logger.info(f"Sending email to {runtime.context.from_email}", extra={"extra_data": {
+          "subject": runtime.context.subject, "message_id": runtime.context.message_id,
+      }})
       await reply_to_email(
         original_message_id=runtime.context.message_id,
         original_sender=runtime.context.from_email,
@@ -153,7 +158,7 @@ class AgentFactory(AgentBase):
         references=runtime.context.references
       )
     except Exception as e:
-      print(f"Error sending email: {e}")
+      logger.error(f"Error sending email: {e}", exc_info=True)
     
   # def run(self, request: AgentRunRequest, customer: CustomerModel) -> str:
   #   """Sync entrypoint for scripts/tests only. Prefer arun() inside an async app."""
@@ -170,11 +175,7 @@ class AgentFactory(AgentBase):
       # ToolNode returns a list of ToolMessage objects
       return response
     except Exception as e:
-      # If tool execution fails, return error as tool response
-      import logging
-      logger = logging.getLogger(__name__)
-      logger.error(f"Tool execution failed: {e}")
-      # Return a placeholder - in production you might want to create a ToolMessage with error
+      logger.error(f"Tool execution failed: {e}", exc_info=True)
       raise
 
   @tool  

@@ -100,11 +100,20 @@ def register_agent(name: Optional[str] = None, *, registry: Optional[AgentRegist
 
     return decorator
 
-def create_agent() -> AgentFactory:
+def _load_factory_class(dotted_path: str | None) -> Type[AgentFactory]:
+    if not dotted_path:
+        return AgentFactory
+    module_path, class_name = dotted_path.rsplit(".", 1)
+    module = importlib.import_module(module_path)
+    return getattr(module, class_name)
+
+
+def create_agent() -> None:
   agent_configs = load_agent_configs()
   for agent_config in agent_configs:
     state_class = _load_state_class(agent_config.get("state_class"))
-    print(f"Creating agent {agent_config['name']} with state={state_class.__name__} tools={agent_config['tools']}")
+    factory_class = _load_factory_class(agent_config.get("factory_class"))
+    print(f"Creating agent {agent_config['name']} with state={state_class.__name__} factory={factory_class.__name__} tools={agent_config['tools']}")
     system_prompt = Path(Path(__file__).parent.parent.parent / agent_config["system_prompt_path"]).read_text(
         encoding="utf-8"
     )
@@ -112,17 +121,26 @@ def create_agent() -> AgentFactory:
         "thinking": {"type": "disabled"}
     })
     db_uri = os.getenv(agent_config["db_uri"])
-    agent_cls = AgentFactory(
-      system_prompt=system_prompt,
-      name=agent_config["name"],
-      llm=llm,
-      tools=agent_config["tools"],
-      db_uri=db_uri,
-      skill_names=agent_config["skill_names"],
-      communication_type=agent_config["communication_type"],
-      state_class=state_class,
-    )
-    AGENTS[agent_config["name"]] = agent_cls
+
+    if factory_class is not AgentFactory:
+        agent_instance = factory_class(
+            name=agent_config["name"],
+            llm=llm,
+            db_uri=db_uri,
+            communication_type=agent_config["communication_type"],
+        )
+    else:
+        agent_instance = AgentFactory(
+            system_prompt=system_prompt,
+            name=agent_config["name"],
+            llm=llm,
+            tools=agent_config["tools"],
+            db_uri=db_uri,
+            skill_names=agent_config["skill_names"],
+            communication_type=agent_config["communication_type"],
+            state_class=state_class,
+        )
+    AGENTS[agent_config["name"]] = agent_instance
 
 def get_agent(name: str) -> AgentFactory:
   return AGENTS[name]

@@ -1,5 +1,4 @@
 # HTTP routes — health and tool API for SendGrid Inbound Parse webhook
-import logging
 import json
 import re
 import pika
@@ -13,9 +12,10 @@ from src.services.rabbitmq_service import RabbitMQService
 from fastapi.responses import Response
 from src.core.customer import CustomerModel
 from DAL.customerDA import CustomerDA
+from src.utils.logger import get_logger
 
 router = APIRouter(prefix="/api/sendgrid", tags=["api"])
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 def extract_message_id(headers: str | None) -> str | None:
@@ -93,12 +93,10 @@ async def sendgrid_inbound(
         # Look up customer by email
         customer = await CustomerDA().get_customer_by_email_address(from_addr)
         
-        print(f"request: {email_str}")
-        print(f"message_id: {message_id}")
-        print(f"from_email: {from_addr}")
-        print(f"to: {to}")
-        print(f"subject: {subject}")
-        print(f"references: {references}")
+        logger.info("Processing inbound email", extra={"extra_data": {
+            "from_email": from_addr, "to": to, "subject": subject,
+            "message_id": message_id, "references": references,
+        }})
 
         agent_request: SendGridInboundRequest | None = None
         if "rxnorm" in to:
@@ -130,5 +128,5 @@ async def sendgrid_inbound(
         return Response(status_code=200)
         
     except Exception as e:
-        print(f"Error processing inbound email: {e}")
+        logger.error(f"Error processing inbound email: {e}", exc_info=True)
         return Response(status_code=200)

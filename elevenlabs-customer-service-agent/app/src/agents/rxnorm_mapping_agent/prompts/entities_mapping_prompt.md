@@ -1,8 +1,5 @@
----
-name: rxnorm_mapping_skill
-description: Maps MEDICATION entities from normalized clinical text to RxNorm drug concepts (RXCUI, TTY, canonical name) using RXNCONSO, RXNREL, and related tables.
-when_to_use: Use after clinical_entity_extraction_skill (and text_normalize_skill) to resolve each medication mention to a stable drug concept for charting, CDS, and interoperability.
----
+## Description
+Maps MEDICATION entities from normalized clinical text to RxNorm drug concepts (RXCUI, TTY, canonical name) using RXNCONSO, RXNREL, and related tables.
 
 ## Purpose
 

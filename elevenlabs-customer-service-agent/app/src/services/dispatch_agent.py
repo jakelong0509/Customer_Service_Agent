@@ -1,6 +1,5 @@
 # Agent dispatch — high-level orchestration for customer service conversations
 import json
-import logging
 from typing import Any, Optional, Type
 
 from src.core.conversation import CallContext
@@ -9,7 +8,9 @@ from src.services.agent_registry import AgentType, get_agent_registry
 from src.core.agent_run_request_model import AgentRunRequest
 from src.services.agent_registry import get_agent
 from src.core.customer import CustomerModel
-logger = logging.getLogger(__name__)
+from src.utils.logger import get_logger
+
+logger = get_logger(__name__)
 
 _agents_pkg_loaded = False
 

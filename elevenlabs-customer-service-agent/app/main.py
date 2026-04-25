@@ -10,13 +10,13 @@ from src.infrastructure.database import close_pool, init_pool
 from src.infrastructure.redis import close_redis, init_redis
 from src.agents.shared_tools import auto_register_tools
 from src.services.agent_registry import create_agent
-from src.services.dispatch_agent import invoke_agent
-from DAL.customerDA import CustomerDA
 from src.infrastructure.milvus import close_milvus, init_milvus
+from src.utils.logger import setup_logging
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Startup: init DB and Redis. Shutdown: close both."""
+    setup_logging()
     init_milvus()
     await init_pool()
     await init_redis()

@@ -34,14 +34,14 @@ async def db_ingest():
     from src.services.db_service import DBService
     db_service = DBService()
     table_names_dict = {
-        #"RXNSAT": "rxnorm_attributes",
-        #"RXNSTY": "rxnorm_semantic_types",
+        "RXNSAT": "rxnorm_attributes",
+        "RXNSTY": "rxnorm_semantic_types",
         "RXNDOC": "rxnorm_documentation",
         "RXNREL": "rxnorm_relationships",
     }
     table_columns_dict = {
-        #"RXNSAT": [col.lower() for col in RXNSAT_COLUMNS],
-        #"RXNSTY": [col.lower() for col in RXNSTY_COLUMNS],
+        "RXNSAT": [col.lower() for col in RXNSAT_COLUMNS],
+        "RXNSTY": [col.lower() for col in RXNSTY_COLUMNS],
         "RXNDOC": [col.lower() for col in RXNDOC_COLUMNS],
         "RXNREL": [col.lower() for col in RXNREL_COLUMNS],
     }
